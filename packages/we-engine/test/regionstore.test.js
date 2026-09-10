@@ -4,7 +4,7 @@ import {
   writeRegion, encodeBlockStates, localIndex, readRegion, decodeChunk, chunkSections, readSection, SECTION_VOLUME,
 } from '../src/anvil/index.js';
 import { RegionStore } from '../src/worldedit/regionStore.js';
-import { opMirror, opSet } from '../src/worldedit/transform.js';
+import { opMirror } from '../src/worldedit/transform.js';
 
 // Construit un buffer région r.0.0 avec un seul chunk (0,0), section Y=0 portant
 // les blocs fournis (coords locales 0..15).

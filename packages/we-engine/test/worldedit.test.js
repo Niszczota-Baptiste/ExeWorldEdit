@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { transformProperties, isYMirrorSafe, __test } from '../src/worldedit/blockstates.js';
 import {
-  MemoryVolume, readSelection, mirrorSchematic, rotateSchematic, stampSchematic,
+  MemoryVolume, readSelection, mirrorSchematic, rotateSchematic,
   opMirror, opMirrorCopy, opRotate, opTranslate, opReplace, opSet, opCopy, opPaste, sameBlock, selectionSize,
   opWalls, opFaces, opHollow, opOverlay, opNaturalize, opStack, opSphere, opCyl, opSmooth, opScale, opMix,
   opLine, opPyramid, opCone, opErode, opDilate, opDrain, opPath, opTerrain,
@@ -141,7 +141,7 @@ test('miroir X puis Z d’un escalier symétrique : asymétrie nulle', () => {
 test('rotation 90×4 = identité', () => {
   const vol = new MemoryVolume();
   const sel = { min: { x: 0, y: 0, z: 0 }, max: { x: 2, y: 1, z: 1 } };
-  fill(vol, sel, (x, y, z) => (x === 0 ? { Name: 'minecraft:oak_stairs', Properties: { facing: 'east' } } : null));
+  fill(vol, sel, (x, _y, _z) => (x === 0 ? { Name: 'minecraft:oak_stairs', Properties: { facing: 'east' } } : null));
   const before = readSelection(vol, sel);
   let s = before;
   for (let i = 0; i < 4; i++) s = rotateSchematic(s, 1);

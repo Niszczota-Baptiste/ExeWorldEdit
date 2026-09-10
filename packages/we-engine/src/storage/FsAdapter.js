@@ -203,13 +203,13 @@ export class FsAdapter extends StorageAdapter {
   _index(scope) { return readJson(this._indexFile(scope), []) || []; }
 
   listSchematics(scope) {
-    return this._index(scope).map(({ file, ...meta }) => meta); // eslint-disable-line no-unused-vars
+    return this._index(scope).map(({ file: _file, ...meta }) => meta);
   }
 
   getSchematicMeta(scope, id) {
     const row = this._index(scope).find((r) => String(r.id) === String(id));
     if (!row) return null;
-    const { file, ...meta } = row; // eslint-disable-line no-unused-vars
+    const { file: _file, ...meta } = row;
     return meta;
   }
 
@@ -227,7 +227,7 @@ export class FsAdapter extends StorageAdapter {
     const index = this._index(scope);
     index.unshift(record);
     writeJson(this._indexFile(scope), index);
-    const { file: _f, ...out } = record; // eslint-disable-line no-unused-vars
+    const { file: _file, ...out } = record;
     return out;
   }
 

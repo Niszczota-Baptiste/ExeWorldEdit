@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  decodeBiomes, encodeBiomes, biomeLocalIndex, BIOME_VOLUME,
-  writeRegion, encodeBlockStates, localIndex, SECTION_VOLUME,
+  decodeBiomes, encodeBiomes, BIOME_VOLUME,
+  writeRegion, encodeBlockStates, SECTION_VOLUME,
 } from '../src/anvil/index.js';
 import nbt from 'prismarine-nbt';
 import { RegionStore } from '../src/worldedit/regionStore.js';

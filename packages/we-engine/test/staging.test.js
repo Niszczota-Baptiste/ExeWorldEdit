@@ -549,3 +549,18 @@ test('annuler régénère un aperçu tronqué au lieu d’échouer', async () =>
   await store.warmup(buildExtent(adapter.getProject('p1')));
   assert.equal(store.getBlock(1, 1, 1), null, 'l’annulation a bien eu lieu');
 });
+
+// ── Parité descripteur ↔ exécution ─────────────────────────────────────────
+
+test('toute opération déclarée dans le descripteur est réellement branchée', async () => {
+  const { OPERATION_IDS } = await import('../src/worldedit/operations.js');
+  const { OPERATION_NAMES } = await import('../src/staging/index.js');
+  // `copy` et `paste` sont traitées à part dans applyOperation (presse-papier).
+  const branchees = new Set([...OPERATION_NAMES, 'copy', 'paste']);
+
+  const declareesNonBranchees = [...OPERATION_IDS].filter((id) => !branchees.has(id));
+  assert.deepEqual(declareesNonBranchees, [], 'le descripteur génère l’interface : une opération listée là et absente ici donne un bouton qui échoue');
+
+  const brancheesNonDeclarees = [...branchees].filter((id) => !OPERATION_IDS.has(id));
+  assert.deepEqual(brancheesNonDeclarees, [], 'une opération branchée mais non déclarée est inatteignable depuis l’interface');
+});

@@ -11,6 +11,7 @@ let FONT = null;
 function font() {
   if (FONT) return FONT;
   const path = new URL('../../assets/fonts/unifont.otf', import.meta.url);
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin dérivé de import.meta.url, pas d'une entrée
   const buf = fs.readFileSync(path);
   // opentype.parse veut un ArrayBuffer exact (Buffer Node = vue sur un pool).
   FONT = opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
