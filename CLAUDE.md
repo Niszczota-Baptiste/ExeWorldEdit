@@ -75,6 +75,7 @@ npm run dev   --workspace @titi/desktop   # Vite + Electron
 npm run start --workspace @titi/desktop   # build puis lancement
 npm run dist  --workspace @titi/desktop   # installeur Windows
 npm run demo  --workspace @titi/desktop -- <dossier>   # build de démonstration
+npm run icon  --workspace @titi/desktop   # régénère build/icon.ico
 
 npm run bench --workspace @titi/we-engine                 # médiane de 1
 npm run bench --workspace @titi/we-engine -- --repeat=3   # médiane de 3
@@ -106,7 +107,8 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Une couleur de bloc pour le viewport | `EXTRA` dans `apps/desktop/src/renderer/viewport/blockColors.js` (en attendant l'atlas) |
 | Un réglage de l'application | `DEFAULT_SETTINGS` (`apps/desktop/src/renderer/theme.js`) + son champ dans `Settings.jsx` ; il se persiste tout seul via `readSettings`/`writeSettings` de l'adapter |
 | Une variable de thème ou de densité | `theme.js` ET `tokens.css` — un test compare les deux à l'échelle 1, ne pas n'en changer qu'une |
-| Une icône | `apps/desktop/src/renderer/shell/icons.js` — le SEUL fichier du renderer qui importe `lucide-react` |
+| Une icône dans l'interface | `apps/desktop/src/renderer/shell/icons.js` — le SEUL fichier du renderer qui importe `lucide-react` |
+| L'icône de l'application (exe, installeur) | `apps/desktop/scripts/make-icon.js`, puis `npm run icon --workspace @titi/desktop` — le binaire est régénérable, jamais retouché à la main |
 | Un format d'entrée | `openAnyPath` (`apps/desktop/src/main/index.js`) décide selon l'extension ; dialogue, glisser-déposer et chemin de lancement y passent tous |
 
 ## Ce qui n'est pas encore là

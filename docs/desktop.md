@@ -800,9 +800,33 @@ La cible **Windows** s'arrête sur `spawn wine ENOENT` depuis Linux : graver les
 métadonnées et l'icône d'un `.exe` demande wine. Ce dernier maillon ne peut se
 vérifier que sur une vraie machine Windows.
 
-Il manque aussi une **icône** : `directories.buildResources` pointe sur un
-dossier `build/` qui n'existe pas, donc l'installeur et l'exe porteraient le
-logo Electron générique.
+### L'icône, par un script plutôt qu'un binaire posé là
+
+`build/` n'existait pas : l'exe et l'installeur auraient porté le logo Electron
+générique. `scripts/make-icon.js` (`npm run icon`) la fabrique — la pioche de
+lucide, celle de la barre de titre, en céladon sur le fond des panneaux.
+
+Une icône commitée sans sa source est opaque en revue et impossible à faire
+évoluer : c'est le même raisonnement que pour les fixtures `.mca`, construites
+à la volée plutôt que commitées. Ici le binaire doit exister sur disque, mais
+le script qui le régénère est à côté.
+
+Le rendu passe par Electron, seul outil de dessin du dépôt : une fenêtre hors
+écran charge le SVG et capture, à sept tailles (16 à 256 — Windows choisit selon
+le contexte). Deux détours qui n'en sont pas, tous deux trouvés en essayant :
+
+- **pas d'URL `data:`** — Chromium refuse la navigation de premier niveau vers
+  ce schéma, et Electron 44 la rejette par un `ERR_FAILED` sec ;
+- **une seule fenêtre, réutilisée** — en créer puis en détruire une par taille
+  échoue dès la deuxième dans un affichage virtuel.
+
+L'ICO est écrit à la main : en-tête, répertoire, puis les PNG bout à bout (depuis
+Vista, une entrée peut être un PNG tel quel). La structure du fichier produit a
+été relue et vérifiée — sept images, toutes des PNG, décalages cohérents.
+
+Ce qui reste invérifiable d'ici : que Windows grave bien cette icône dans l'exe.
+Le fichier est valide et à l'emplacement documenté, mais l'embarquement demande
+wine.
 
 ---
 
