@@ -22,49 +22,49 @@ La colonne « Avant » vient de `bench/baseline.json`, mesuré le 2026-09-10 sur
 
 | Scénario | Avant | Après | Pic mémoire | Débit | Gain |
 |---|---|---|---|---|---|
-| `set-10M` | 6590 ms | 6147 ms | 160 Mo | 1.7 M/s blocs | dans le bruit |
-| `replace` | 2092 ms | 2039 ms | 138 Mo | 1.7 M/s blocs | dans le bruit |
-| `mix` | 2773 ms | 2493 ms | 458 Mo | 1.4 M/s blocs | dans le bruit |
-| `mirror-rotate` | 9312 ms | 7511 ms | 1042 Mo | 942 k/s blocs | dans le bruit |
-| `terrain-1024` | 42.0 s | 37.6 s | 1069 Mo | 28 k/s colonnes | dans le bruit |
-| `naturalize` | 2254 ms | 2018 ms | 161 Mo | 32 k/s colonnes | dans le bruit |
+| `set-10M` | 6590 ms | 930 ms | 160 Mo | 11.3 M/s blocs | **× 7.1 plus rapide** |
+| `replace` | 2092 ms | 324 ms | 138 Mo | 10.9 M/s blocs | **× 6.5 plus rapide** |
+| `mix` | 2773 ms | 1066 ms | 445 Mo | 3.3 M/s blocs | **× 2.6 plus rapide** |
+| `mirror-rotate` | 9312 ms | 3543 ms | 1087 Mo | 2.0 M/s blocs | **× 2.6 plus rapide** |
+| `terrain-1024` | 42.0 s | 7383 ms | 1071 Mo | 142 k/s colonnes | **× 5.7 plus rapide** |
+| `naturalize` | 2254 ms | 513 ms | 160 Mo | 128 k/s colonnes | **× 4.4 plus rapide** |
 
 ## Entrées / sorties
 
 | Scénario | Avant | Après | Pic mémoire | Débit | Gain |
 |---|---|---|---|---|---|
-| `region-decode` | 3502 ms | 830 ms | 327 Mo | 15 k/s sections | **× 4.2 plus rapide** |
-| `region-write` | 857 ms | 842 ms | 459 Mo | 1 k/s chunks | dans le bruit |
-| `export-mca` | 4 ms | 5 ms | 324 Mo | 218/s régions | dans le bruit |
-| `export-schem` | 340 ms | 344 ms | 183 Mo | 3.1 M/s blocs | dans le bruit |
+| `region-decode` | 3502 ms | 961 ms | 328 Mo | 13 k/s sections | **× 3.6 plus rapide** |
+| `region-write` | 857 ms | 886 ms | 467 Mo | 1 k/s chunks | dans le bruit |
+| `export-mca` | 4 ms | 5 ms | 323 Mo | 212/s régions | dans le bruit |
+| `export-schem` | 340 ms | 260 ms | 183 Mo | 4.0 M/s blocs | **× 1.3 plus rapide** |
 
 ## Décomposition du chargement d’une région
 
 | Scénario | Avant | Après | Pic mémoire | Débit | Gain |
 |---|---|---|---|---|---|
-| `phase-inflate` | 101 ms | 91 ms | 345 Mo | 11 k/s chunks | dans le bruit |
-| `phase-nbt-parse` | 346 ms | 346 ms | 357 Mo | 3 k/s chunks | dans le bruit |
-| `phase-nbt-simplify` | 41 ms | 40 ms | 453 Mo | 25 k/s chunks | dans le bruit |
-| `phase-unpack-sections` | 2585 ms | 240 ms | 464 Mo | 51 k/s sections | **× 10.8 plus rapide** |
+| `phase-inflate` | 101 ms | 90 ms | 346 Mo | 11 k/s chunks | dans le bruit |
+| `phase-nbt-parse` | 346 ms | 338 ms | 358 Mo | 3 k/s chunks | dans le bruit |
+| `phase-nbt-simplify` | 41 ms | 41 ms | 462 Mo | 25 k/s chunks | dans le bruit |
+| `phase-unpack-sections` | 2585 ms | 243 ms | 471 Mo | 50 k/s sections | **× 10.6 plus rapide** |
 
 ## Chemin chaud de RegionStore
 
 | Scénario | Avant | Après | Pic mémoire | Débit | Gain |
 |---|---|---|---|---|---|
-| `store-setblock` | 1066 ms | 983 ms | 100 Mo | 1.1 M/s blocs | dans le bruit |
-| `store-getblock` | 141 ms | 135 ms | 99 Mo | 7.8 M/s blocs | dans le bruit |
+| `store-setblock` | 1066 ms | 276 ms | 100 Mo | 3.8 M/s blocs | **× 3.9 plus rapide** |
+| `store-getblock` | 141 ms | 47 ms | 99 Mo | 22.4 M/s blocs | **× 3.0 plus rapide** |
 
 ## Où part le temps au chargement
 
-Décoder une région pleine (1024 chunks, 12288 sections) prend **830 ms**.
+Décoder une région pleine (1024 chunks, 12288 sections) prend **961 ms**.
 Répartition mesurée :
 
 | Étape | Temps | Part |
 |---|---|---|
-| `inflate` | 91 ms | 13 % |
-| `nbt-parse` | 346 ms | 48 % |
-| `nbt-simplify` | 40 ms | 6 % |
-| `unpack-sections` | 240 ms | 33 % |
+| `inflate` | 90 ms | 13 % |
+| `nbt-parse` | 338 ms | 47 % |
+| `nbt-simplify` | 41 ms | 6 % |
+| `unpack-sections` | 243 ms | 34 % |
 
 (La somme des étapes ne retombe pas exactement sur le total : chacune
 réalloue de son côté. Ce sont les **proportions** qui comptent.)
