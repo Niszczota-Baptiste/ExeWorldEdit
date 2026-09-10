@@ -2,6 +2,7 @@ import nbt from 'prismarine-nbt';
 import {
   readRegion, writeRegion, decodeChunk, chunkSections, readSection, encodeBlockStates,
   localIndex, SECTION_VOLUME, decodeBiomes, encodeBiomes, biomeLocalIndex,
+  chunkBlockEntities, setChunkBlockEntities, blockEntityPos, moveBlockEntity,
 } from '../anvil/index.js';
 
 // RegionStore : présente un ensemble de régions .mca comme un VOLUME adressable
@@ -251,6 +252,86 @@ export class RegionStore {
     sec.dirty = true;
     rec.dirty = true;
     region.dirty = true;
+  }
+
+  // ── Block entities ────────────────────────────────────────────────────────
+  //
+  // Elles vivent à part de la grille de blocs : un coffre est un `chest` dans
+  // la palette ET une entrée `block_entities` qui porte son contenu. Une
+  // opération qui recopie des blocs sans elles rend des coffres vides.
+
+  /**
+   * Entrées des chunks chargés qui tombent dans la boîte, en coordonnées monde.
+   * Chaque entrée est le compound NBT tagué d'origine — on ne l'interprète pas.
+   */
+  listBlockEntities(bbox) {
+    const out = [];
+    for (const r of this.regions.values()) {
+      if (!r.chunks) continue;
+      for (const rec of r.chunks.values()) {
+        if (!rec.chunk?.root) continue;
+        for (const entry of chunkBlockEntities(rec.chunk)) {
+          const p = blockEntityPos(entry);
+          if (!p) continue;
+          if (p.x < bbox.min.x || p.x > bbox.max.x) continue;
+          if (p.y < bbox.min.y || p.y > bbox.max.y) continue;
+          if (p.z < bbox.min.z || p.z > bbox.max.z) continue;
+          out.push({ ...p, entry });
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Pose une entrée (déjà déplacée) dans le chunk qui la contient. Une entrée
+   * déjà présente à ces coordonnées est REMPLACÉE : deux block entities sur la
+   * même case n'ont pas de sens, et Minecraft n'en lirait qu'une.
+   *
+   * Rend `false` si le chunk n'est pas chargé — comme `setBlock`, on ne
+   * fabrique pas de chunk ex nihilo.
+   */
+  putBlockEntity(x, y, z, entry) {
+    const rec = this._chunkRec(fdiv(x, 16), fdiv(z, 16));
+    if (!rec || !rec.chunk?.root) return false;
+    const kept = chunkBlockEntities(rec.chunk).filter((e) => {
+      const p = blockEntityPos(e);
+      return !p || p.x !== x || p.y !== y || p.z !== z;
+    });
+    kept.push(entry);
+    setChunkBlockEntities(rec.chunk, kept);
+    rec.chunk.dirty = true;
+    rec.dirty = true;
+    const region = this._regionAt(fdiv(x, 16), fdiv(z, 16));
+    if (region) region.dirty = true;
+    return true;
+  }
+
+  /** Retire l'entrée d'une case, s'il y en a une. Rend `true` si quelque chose a bougé. */
+  removeBlockEntity(x, y, z) {
+    const rec = this._chunkRec(fdiv(x, 16), fdiv(z, 16));
+    if (!rec || !rec.chunk?.root) return false;
+    const all = chunkBlockEntities(rec.chunk);
+    const kept = all.filter((e) => {
+      const p = blockEntityPos(e);
+      return !p || p.x !== x || p.y !== y || p.z !== z;
+    });
+    if (kept.length === all.length) return false;
+    setChunkBlockEntities(rec.chunk, kept);
+    rec.chunk.dirty = true;
+    rec.dirty = true;
+    const region = this._regionAt(fdiv(x, 16), fdiv(z, 16));
+    if (region) region.dirty = true;
+    return true;
+  }
+
+  /** Copie les entrées d'une boîte vers un autre store, décalées. */
+  copyBlockEntitiesTo(target, bbox, dx = 0, dy = 0, dz = 0) {
+    let moved = 0;
+    for (const { x, y, z, entry } of this.listBlockEntities(bbox)) {
+      if (target.putBlockEntity(x + dx, y + dy, z + dz, moveBlockEntity(entry, dx, dy, dz))) moved++;
+    }
+    return moved;
   }
 
   // Décode (paresseusement) la grille de biomes 4³ d'une section.

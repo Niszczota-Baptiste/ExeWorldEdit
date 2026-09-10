@@ -653,6 +653,58 @@ mesure au niveau d'`applyOperation`.
 
 ---
 
+## Les block entities suivent leurs blocs
+
+Le contenu d'un coffre, le texte d'un panneau, le motif d'une bannière : rien de
+tout ça n'est dans la grille de blocs. C'est une liste à part dans le chunk,
+dont chaque entrée porte ses coordonnées MONDE.
+
+Deux pertes en découlaient, et aucune ne se voyait avant d'ouvrir le monde en
+jeu :
+
+- **l'export avec décalage** reconstruisait le build depuis `deriveSparse`, qui
+  ne porte que des blocs. Les coffres arrivaient vides, les panneaux muets, les
+  biomes remis à zéro ;
+- **les opérations qui déplacent des blocs** (miroir, rotation, translation,
+  stack, copier-coller, échelle) laissaient les entrées sur place. Faire pivoter
+  un build déplaçait les coffres et abandonnait leur contenu à l'ancienne
+  position.
+
+### Le bon endroit était la `Schematic`
+
+Toutes les transformations passent par le même tuyau : `readSelection` →
+transformation → `stampSchematic`. Porter les entrées **dans la structure
+`Schematic`** plutôt que dans chaque opération, c'est ce qui les fait toutes
+marcher d'un coup — y compris celles qu'on écrira plus tard.
+
+L'entrée est recopiée **telle quelle**, seules ses coordonnées changent. On ne
+sait pas ce qu'il y a dedans et on n'a pas à le savoir : c'est la seule façon de
+ne rien perdre d'une version de Minecraft qu'on ne connaît pas encore.
+
+### Trois règles qui évitent des fantômes
+
+- **Une case ne porte qu'une entrée.** Poser sur une case occupée remplace :
+  deux block entities au même endroit n'ont pas de sens, et Minecraft n'en
+  lirait qu'une, laquelle étant indéfini.
+- **Écrire un bloc sans entrée en retire une.** Un coffre remplacé par de la
+  pierre qui garderait son contenu deviendrait un coffre fantôme, réapparaissant
+  sous le bloc suivant. `stampSchematic` en mode `overwrite` et `fillSelection`
+  nettoient la case.
+- **La capacité est optionnelle sur le volume**, comme `getBiome` : `RegionStore`
+  la porte, `MemoryVolume` non, et les opérations n'ont pas à savoir lequel elles
+  manipulent. `MaskedVolume` la relaie en respectant son masque — lecture libre,
+  écriture masquée, exactement comme pour les blocs.
+
+L'export décalé emporte désormais aussi les **biomes**, et annonce ce qu'il a
+transporté (`carried`) : un export silencieux dont on découvre plus tard ce
+qu'il a gardé ne vaut rien.
+
+Ce qui reste : les **entités mobiles** (`entities/r.X.Z.mca`) — villageois,
+cadres, armor stands. Elles vivent dans un autre fichier et ne sont pas encore
+touchées.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
@@ -718,11 +770,10 @@ mélangé passerait les tests de rejouabilité et produirait quand même des ban
 
 ## Limites connues, non encore traitées
 
-- **Entités absentes.** Rien n'est lu ni écrit dans `entities/r.X.Z.mca`, et
-  l'export `.schem` sort une liste `Entities` vide. Phase 1.3.
-- **L'export avec décalage re-chunke** et perd au passage les block-entities
-  (contenu des coffres, texte des panneaux) et les biomes. L'export sans
-  décalage, lui, est lossless. Phase 1.3.
+
+- **Les entités mobiles** (`entities/r.X.Z.mca` : villageois, cadres, armor
+  stands) ne sont ni lues ni écrites, et l'export `.schem` sort une liste
+  `Entities` vide. Les block entities, elles, sont portées — voir plus bas.
 - **`getBlock` alloue un objet par appel** (`{ Name, Properties }`). Le reste du
   chemin chaud est traité (voir « Le chemin chaud du `RegionStore` »).
 - **Le parallélisme ne couvre que deux opérations** (`terrain`, `naturalize`).
@@ -862,7 +913,7 @@ jetable sans toucher au vrai.
 | 2.6 | Empaquetage | configuration electron-builder écrite, jamais exécutée sur Windows |
 | 1.1 | Mesurer | **fait** — `bench/`, 16 scénarios, `RESULTS.md` |
 | 1.2 | Moteur rapide | **fait** — dépack de sections × 10,7, `RegionStore` (set-10M × 6,7), aperçu binaire et incrémental × 11,1 (−82 % sur le total), pool de fils × 2,4 sur `terrain`, plafonds réglables. Reste : aperçu découpé par chunk, `getBlock` sans allocation |
-| 1.3 | Entités | à venir |
+| 1.3 | Entités | block entities **faites** (portées par les opérations et l'export décalé, biomes compris) ; entités mobiles (`entities/*.mca`) à venir |
 | 3 | Brushs | à venir |
 | 4 | Tracés, PNJ, dispersion | à venir |
 | 5 | Outils de génération | à venir |

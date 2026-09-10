@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { FsAdapter } from '../src/storage/index.js';
 import { createStaging, createLibrary, buildExtent, buildLimits, validateSelection } from '../src/staging/index.js';
-import { buildRegion, readBack } from './fixtures/region.js';
+import { buildRegion, readBack, readBackEntities } from './fixtures/region.js';
 
 // Bout-en-bout du staging porté sur le StorageAdapter. C'est LE filet de
 // sécurité du portage : les modules purs sont repris à l'identique, mais cette
@@ -923,4 +923,147 @@ test('une opération colonne-locale sur plusieurs régions passe par les fils, e
   const aperçu = staging.readPreview('par');
   assert.ok(aperçu.count > 0, 'l’aperçu est régénéré après le chemin parallèle');
   await closePool();
+});
+
+// ── Block entities ──────────────────────────────────────────────────────────
+//
+// Le contenu d'un coffre et le texte d'un panneau ne sont PAS dans la grille de
+// blocs. Une opération qui recopie des blocs sans eux rend des coffres vides —
+// une perte silencieuse, qui ne se voit qu'en jeu, longtemps après.
+
+/** Projet 16³ avec un coffre marqué en (3, 2, 4). */
+function projectAvecCoffre() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'we-be-'));
+  roots.push(root);
+  const adapter = new FsAdapter({ root });
+  const staging = createStaging(adapter);
+  const blocks = [];
+  for (let x = 0; x < 16; x++) for (let z = 0; z < 16; z++) blocks.push({ x, y: 0, z, Name: STONE });
+  blocks.push({ x: 3, y: 2, z: 4, Name: 'minecraft:chest' });
+
+  adapter.saveProject({ id: 'be', name: 'Coffre', min: { x: 0, y: 0, z: 0 }, size: { x: 16, y: 16, z: 16 } });
+  adapter.attachSource('be', {
+    name: 'r.0.0.mca',
+    buffer: buildRegion(blocks, {
+      blockEntities: [{ id: 'minecraft:chest', x: 3, y: 2, z: 4, marque: 'diamants' }],
+    }),
+  });
+  return { adapter, staging, project: () => adapter.getProject('be') };
+}
+
+test('le store voit les block entities et les déplace sans les interpréter', async () => {
+  const { staging, project } = projectAvecCoffre();
+  const store = staging.loadStore(project());
+  const box = { min: { x: 0, y: 0, z: 0 }, max: { x: 15, y: 15, z: 15 } };
+  await store.warmup(box);
+
+  const trouvees = store.listBlockEntities(box);
+  assert.equal(trouvees.length, 1);
+  assert.deepEqual({ x: trouvees[0].x, y: trouvees[0].y, z: trouvees[0].z }, { x: 3, y: 2, z: 4 });
+  assert.equal(trouvees[0].entry.marque.value, 'diamants', 'le contenu traverse intact');
+
+  // Une boîte qui ne la contient pas ne doit pas la voir.
+  assert.equal(store.listBlockEntities({ min: { x: 8, y: 0, z: 8 }, max: { x: 15, y: 15, z: 15 } }).length, 0);
+});
+
+test('poser une entrée remplace celle qui occupait la case', async () => {
+  const { staging, project } = projectAvecCoffre();
+  const store = staging.loadStore(project());
+  const box = { min: { x: 0, y: 0, z: 0 }, max: { x: 15, y: 15, z: 15 } };
+  await store.warmup(box);
+
+  const [{ entry }] = store.listBlockEntities(box);
+  // Deux block entities sur la même case n'ont pas de sens : Minecraft n'en
+  // lirait qu'une, et laquelle est indéfini.
+  store.putBlockEntity(3, 2, 4, { ...entry, marque: { type: 'string', value: 'charbon' } });
+  const apres = store.listBlockEntities(box);
+  assert.equal(apres.length, 1);
+  assert.equal(apres[0].entry.marque.value, 'charbon');
+
+  assert.equal(store.removeBlockEntity(3, 2, 4), true);
+  assert.equal(store.listBlockEntities(box).length, 0);
+  assert.equal(store.removeBlockEntity(3, 2, 4), false, 'retirer deux fois ne ment pas');
+});
+
+test('l’export décalé emporte le coffre AVEC son contenu', async () => {
+  // C'était la perte annoncée dans la documentation : l'export avec décalage
+  // reconstruisait le build depuis la seule grille de blocs.
+  const { staging, project } = projectAvecCoffre();
+  const out = await staging.exportBuild(project(), { dx: 32, dy: 5, dz: 16 });
+
+  assert.equal(out.carried.blockEntities, 1, 'l’export annonce ce qu’il a emporté');
+
+  const entities = await readBackEntities(out.buffer, { regionX: 0, regionZ: 0 });
+  assert.equal(entities.size, 1);
+  const dep = entities.get('35,7,20'); // (3,2,4) + (32,5,16)
+  assert.ok(dep, `coffre absent en (35, 7, 20) ; présents : ${[...entities.keys()].join(' ')}`);
+  assert.equal(dep.id, 'minecraft:chest');
+  assert.equal(dep.marque, 'diamants', 'le contenu a suivi le bloc');
+
+  // Et le bloc lui-même est bien au même endroit que son entrée.
+  const blocs = await readBack(out.buffer);
+  assert.equal(blocs.get('35,7,20')?.Name, 'minecraft:chest');
+});
+
+test('l’export sans décalage reste lossless, entrées comprises', async () => {
+  const { staging, project } = projectAvecCoffre();
+  const out = await staging.exportBuild(project(), null);
+  const entities = await readBackEntities(out.buffer);
+  assert.equal(entities.get('3,2,4')?.marque, 'diamants');
+});
+
+test('les opérations qui DÉPLACENT des blocs emportent leurs block entities', async () => {
+  // Sans ça, faire pivoter un build laisse tous les coffres derrière : les
+  // blocs bougent, leur contenu reste sur place. Une corruption silencieuse
+  // qu'on ne découvre qu'en jeu.
+  const cas = [
+    ['translate', { dx: 5, dy: 1, dz: 2 }, '8,3,6'],
+    ['mirror', { axis: 'x' }, '12,2,4'],   // x local 3 → 15-3 = 12
+    ['rotate', { degrees: 90 }, '11,2,3'], // (3,4) → (15-4, 3)
+  ];
+
+  for (const [operation, params, attendu] of cas) {
+    const { staging, project } = projectAvecCoffre();
+    await staging.applyOperation({
+      project: project(), operation, params,
+      selection: sel({ x: 0, y: 0, z: 0 }, { x: 15, y: 15, z: 15 }), actor: 't',
+    });
+    const out = await staging.exportBuild(project(), null);
+    const entities = await readBackEntities(out.buffer);
+    const blocs = await readBack(out.buffer);
+
+    assert.equal(entities.size, 1, `${operation} : une entrée et une seule`);
+    assert.ok(entities.has(attendu),
+      `${operation} : coffre attendu en ${attendu}, trouvé en ${[...entities.keys()].join(' ')}`);
+    assert.equal(entities.get(attendu).marque, 'diamants', `${operation} : contenu perdu`);
+    assert.equal(blocs.get(attendu)?.Name, 'minecraft:chest',
+      `${operation} : l’entrée doit être là où est le bloc`);
+  }
+});
+
+test('stack répète le coffre ET son contenu', async () => {
+  const { staging, project } = projectAvecCoffre();
+  await staging.applyOperation({
+    project: project(), operation: 'stack', params: { count: 2, direction: 'up' },
+    selection: sel({ x: 0, y: 0, z: 0 }, { x: 15, y: 3, z: 15 }), actor: 't',
+  });
+  const out = await staging.exportBuild(project(), null);
+  const entities = await readBackEntities(out.buffer);
+
+  // L'original en y=2, plus une copie par répétition (hauteur de sélection 4).
+  for (const y of [2, 6, 10]) {
+    assert.ok(entities.has(`3,${y},4`), `copie manquante en y=${y} ; présentes : ${[...entities.keys()].join(' ')}`);
+    assert.equal(entities.get(`3,${y},4`).marque, 'diamants');
+  }
+});
+
+test('un bloc qui remplace un coffre n’en garde pas le contenu', async () => {
+  const { staging, project } = projectAvecCoffre();
+  await staging.applyOperation({
+    project: project(), operation: 'set', params: { block: { name: STONE } },
+    selection: ONE(3, 2, 4), actor: 't',
+  });
+  const out = await staging.exportBuild(project(), null);
+  const entities = await readBackEntities(out.buffer);
+  assert.equal(entities.size, 0, 'un coffre fantôme réapparaîtrait sous le bloc suivant');
 });

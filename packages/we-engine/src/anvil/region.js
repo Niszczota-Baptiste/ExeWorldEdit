@@ -90,6 +90,56 @@ export function chunkSections(chunk) {
     .sort((a, b) => a.Y - b.Y);
 }
 
+// ── Block entities ──────────────────────────────────────────────────────────
+//
+// Le contenu d'un coffre, le texte d'un panneau, le motif d'une bannière : rien
+// de tout ça n'est dans la grille de blocs. C'est une LISTE à part dans le
+// chunk, dont chaque entrée porte ses coordonnées MONDE (`x`, `y`, `z`).
+//
+// On manipule les compounds NBT tagués tels quels : on ne sait pas ce qu'il y a
+// dedans, et on n'a pas à le savoir. Recopier l'entrée entière en ne touchant
+// qu'aux coordonnées, c'est la seule façon de ne rien perdre d'une version de
+// Minecraft qu'on ne connaît pas encore.
+
+const EMPTY_COMPOUND_LIST = () => ({ type: 'list', value: { type: 'compound', value: [] } });
+
+/** Entrées `block_entities` d'un chunk décodé — le tableau tagué, tel quel. */
+export function chunkBlockEntities(chunk) {
+  const v = chunk?.root?.value;
+  const list = v?.block_entities || v?.BlockEntities; // 1.18+ / pré-1.18
+  const arr = list?.value?.value;
+  return Array.isArray(arr) ? arr : [];
+}
+
+/** Remplace la liste `block_entities` d'un chunk décodé. */
+export function setChunkBlockEntities(chunk, entries) {
+  const v = chunk?.root?.value;
+  if (!v) return;
+  const key = v.BlockEntities && !v.block_entities ? 'BlockEntities' : 'block_entities';
+  if (!v[key]) v[key] = EMPTY_COMPOUND_LIST();
+  v[key].value = { type: 'compound', value: entries };
+}
+
+/** Coordonnées monde d'une entrée, ou `null` si elle n'en porte pas. */
+export function blockEntityPos(entry) {
+  const x = entry?.x?.value, y = entry?.y?.value, z = entry?.z?.value;
+  return [x, y, z].every(Number.isFinite) ? { x, y, z } : null;
+}
+
+/**
+ * Copie une entrée en la déplaçant. L'original n'est pas touché : la même
+ * entrée peut servir plusieurs fois (un `stack` recopie le même coffre).
+ */
+export function moveBlockEntity(entry, dx, dy, dz) {
+  const copy = structuredClone(entry);
+  const p = blockEntityPos(entry);
+  if (!p) return copy;
+  copy.x = { type: 'int', value: p.x + dx };
+  copy.y = { type: 'int', value: p.y + dy };
+  copy.z = { type: 'int', value: p.z + dz };
+  return copy;
+}
+
 // Lit la grille de blocs d'une section taguée → { palette, indices } ou null.
 export function readSection(sectionComp) {
   const bs = sectionComp?.block_states;

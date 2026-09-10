@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (257 tests aujourd'hui : 232 moteur, 25 desktop)
+npm test          # tous les paquets (264 tests aujourd'hui : 239 moteur, 25 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -97,6 +97,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Une opération WorldEdit | `packages/we-engine/src/worldedit/transform.js` + son entrée dans `OPS` (`src/staging/staging.js`) + son descripteur dans `operations.js` + ses tests. Elle DOIT rendre des `bounds` couvrant tout ce qu'elle écrit : l'instantané d'annulation ET l'aperçu incrémental s'y fient. Ne l'ajouter à `COLUMN_LOCAL_OPS` que si elle ne lit JAMAIS hors de son (x, z) |
 | Une propriété d'état de bloc à transformer | `src/worldedit/blockstates.js` + une assertion par propriété dans `test/worldedit.test.js` |
 | Un format d'échange | `src/worldedit/schematicFormats.js` + un test de round-trip |
+| Une donnée hors grille de blocs (block entity, biome) | elle voyage dans la `Schematic` (`transform.js`) pour les transformations, et se recopie explicitement dans l'export décalé (`exportBuild`) |
 | Un champ dans l'aperçu | `src/staging/previewCodec.js` (en-tête JSON) + son cas dans `test/preview-codec.test.js` ; le corps binaire ne porte que les blocs |
 | Une chose qui dépend d'où vivent les données | une méthode du `StorageAdapter` + son cas dans la suite de contrat (`test/storage.test.js`) |
 | Un plafond réglable | `DEFAULT_LIMITS` + son entrée dans `LIMIT_RANGES` (`src/staging/geometry.js`), jamais une variable d'environnement. L'interface génère son champ depuis les bornes, il n'y a rien à écrire côté renderer |
@@ -110,9 +111,9 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 
 ## Ce qui n'est pas encore là
 
-Entités (`entities/*.mca`), block-entities préservées à l'export décalé, aperçu
-découpé par chunk, `getBlock` sans allocation, et toute l'application. Détail,
-écarts assumés avec le site et ordre des phases : **`docs/desktop.md`**.
+Entités mobiles (`entities/*.mca`), aperçu découpé par chunk, `getBlock` sans
+allocation, et toute l'application. Détail, écarts assumés avec le site et ordre
+des phases : **`docs/desktop.md`**.
 
 ## Rapport au site `titisite`
 
@@ -165,6 +166,12 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   donnée qui arrive plus tard va dans un effet.
 - **Une grille en `1fr` s'étire.** La carte des régions doit garder ses
   proportions de monde : colonnes à taille fixe, jamais `1fr`.
+- **Le contenu d'un coffre n'est pas dans la grille de blocs.** Les block
+  entities sont une liste à part, avec leurs coordonnées MONDE. Toute opération
+  qui déplace ou efface des blocs doit les suivre — sinon un build pivoté
+  abandonne ses coffres. Elles voyagent dans la `Schematic` (`transform.js`),
+  donc toutes les transformations en héritent ; l'entrée est recopiée telle
+  quelle, seules ses coordonnées changent.
 - **Un fil par chunk ne gagne rien.** Le principal a besoin de l'arbre NBT pour
   réécrire sans perte, et le TRANSFÉRER coûte plus que le décoder (65 ms contre
   60 sur 128 chunks). La seule découpe qui paie est un fil par RÉGION : un

@@ -723,11 +723,36 @@ export function createStaging(adapter, options = {}) {
       if (y < limits.worldMinY || y > limits.worldMaxY) continue;
       store2.setBlock(x, y, z, { Name: e.name, Properties: e.props || null });
     }
+
+    // Les blocs seuls ne font pas un build : un coffre recopié sans son entrée
+    // `block_entities` arrive vide, un panneau arrive muet. Elles se déplacent
+    // avec les blocs — l'entrée est recopiée telle quelle, seules ses
+    // coordonnées changent, pour ne rien perdre d'une version de Minecraft
+    // qu'on ne connaît pas.
+    const movedEntities = store.copyBlockEntitiesTo(store2, extent, dx, dy, dz);
+
+    // Les biomes non plus ne sont pas dans la grille de blocs.
+    let movedBiomes = 0;
+    for (let y = extent.min.y; y <= extent.max.y; y += 4) {
+      for (let z = extent.min.z; z <= extent.max.z; z += 4) {
+        for (let x = extent.min.x; x <= extent.max.x; x += 4) {
+          const b = store.getBiome(x, y, z);
+          if (!b) continue;
+          const ty = y + dy;
+          if (ty < limits.worldMinY || ty > limits.worldMaxY) continue;
+          if (store2.setBiome(x + dx, ty, z + dz, b)) movedBiomes++;
+        }
+      }
+    }
+
     const out = [...store2.commit({ touchedOnly: false })].map(([key, buffer]) => {
       const [rx, rz] = key.split(',').map(Number);
       return { regionX: rx, regionZ: rz, buffer };
     });
-    return regionsToDownload(out, project.name);
+    // `carried` est annoncé à l'utilisateur : « 12 coffres et panneaux
+    // déplacés » vaut mieux qu'un export silencieux dont on découvre plus tard
+    // ce qu'il a gardé.
+    return { ...regionsToDownload(out, project.name), carried: { blockEntities: movedEntities, biomes: movedBiomes } };
   }
 
   /**

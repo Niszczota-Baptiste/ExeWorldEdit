@@ -20,11 +20,31 @@ export class Schematic {
     this.sx = sx; this.sy = sy; this.sz = sz;
     this.data = data || new Array(sx * sy * sz).fill(null);
     this.origin = origin;
+    /**
+     * Block entities, en coordonnées LOCALES : « x,y,z » → compound NBT tagué.
+     *
+     * Le contenu d'un coffre et le texte d'un panneau ne sont pas dans la
+     * grille de blocs. Les porter ICI plutôt que dans chaque opération, c'est
+     * ce qui fait que miroir, rotation, translation, stack, copier-coller et
+     * échelle les emportent tous — ils passent tous par cette structure.
+     *
+     * L'entrée est recopiée telle quelle, seules ses coordonnées bougent : on
+     * ne sait pas ce qu'il y a dedans, et c'est la seule façon de ne rien
+     * perdre d'une version de Minecraft qu'on ne connaît pas.
+     */
+    this.entities = new Map();
   }
 
   idx(x, y, z) { return x + this.sx * (z + this.sz * y); }
   get(x, y, z) { return this.data[this.idx(x, y, z)]; }
   set(x, y, z, b) { this.data[this.idx(x, y, z)] = b; }
+
+  ekey(x, y, z) { return `${x},${y},${z}`; }
+  getEntity(x, y, z) { return this.entities.get(this.ekey(x, y, z)) || null; }
+  setEntity(x, y, z, e) {
+    if (e) this.entities.set(this.ekey(x, y, z), e);
+    else this.entities.delete(this.ekey(x, y, z));
+  }
 }
 
 // ── Forme de sélection (boîte / sphère / cylindre) ───────────────────────────
@@ -54,6 +74,16 @@ export class MaskedVolume {
   // Les sondes sans allocation traversent le masque : il ne filtre que l'ÉCRITURE.
   isAirAt(x, y, z) { return isAirAt(this.inner, x, y, z); }
   matchesAt(x, y, z, b) { return matchesAt(this.inner, x, y, z, b); }
+  // Lecture libre, écriture masquée : mêmes règles que pour les blocs.
+  listBlockEntities(bbox) { return this.inner.listBlockEntities ? this.inner.listBlockEntities(bbox) : []; }
+  putBlockEntity(x, y, z, e) {
+    return (selectionContains(this.sel, x, y, z) && this.inner.putBlockEntity)
+      ? this.inner.putBlockEntity(x, y, z, e) : false;
+  }
+  removeBlockEntity(x, y, z) {
+    return (selectionContains(this.sel, x, y, z) && this.inner.removeBlockEntity)
+      ? this.inner.removeBlockEntity(x, y, z) : false;
+  }
   setBiome(x, y, z, n) { return (selectionContains(this.sel, x, y, z) && this.inner.setBiome) ? this.inner.setBiome(x, y, z, n) : false; }
 }
 
@@ -73,6 +103,13 @@ export function readSelection(vol, sel) {
       for (let x = 0; x < s.x; x++) {
         schem.set(x, y, z, vol.getBlock(sel.min.x + x, sel.min.y + y, sel.min.z + z));
       }
+    }
+  }
+  // Le volume sait-il porter des block entities ? `MemoryVolume` non, et il ne
+  // doit pas avoir à le savoir : la capacité est optionnelle, comme `getBiome`.
+  if (vol.listBlockEntities) {
+    for (const { x, y, z, entry } of vol.listBlockEntities(sel)) {
+      schem.setEntity(x - sel.min.x, y - sel.min.y, z - sel.min.z, entry);
     }
   }
   return schem;
@@ -103,6 +140,15 @@ export function mirrorSchematic(schem, axis) {
       }
     }
   }
+  for (const [key, entry] of schem.entities) {
+    const [x, y, z] = key.split(',').map(Number);
+    out.setEntity(
+      axis === 'x' ? sx - 1 - x : x,
+      axis === 'y' ? sy - 1 - y : y,
+      axis === 'z' ? sz - 1 - z : z,
+      entry,
+    );
+  }
   return out;
 }
 
@@ -127,6 +173,10 @@ function rotate90(schem) {
       }
     }
   }
+  for (const [key, entry] of schem.entities) {
+    const [x, y, z] = key.split(',').map(Number);
+    out.setEntity(sz - 1 - z, y, x, entry); // même application que les blocs
+  }
   return out;
 }
 
@@ -135,6 +185,7 @@ function rotate90(schem) {
 // que les blocs non-air (l'air de la schematic laisse le volume intact).
 export function stampSchematic(vol, schem, origin, mode = 'overwrite') {
   let changed = 0;
+  const porte = !!vol.putBlockEntity;
   for (let y = 0; y < schem.sy; y++) {
     for (let z = 0; z < schem.sz; z++) {
       for (let x = 0; x < schem.sx; x++) {
@@ -144,19 +195,43 @@ export function stampSchematic(vol, schem, origin, mode = 'overwrite') {
         const before = vol.getBlock(wx, wy, wz);
         const after = isAir(b) ? null : clone(b);
         if (!sameBlock(before, after)) { vol.setBlock(wx, wy, wz, after); changed++; }
+        if (!porte) continue;
+        const e = schem.getEntity(x, y, z);
+        // La case reçoit l'entrée qui vient avec le bloc — et PERD celle qui
+        // s'y trouvait sinon. Un coffre remplacé par de la pierre qui garderait
+        // son contenu serait un coffre fantôme.
+        if (e) vol.putBlockEntity(wx, wy, wz, moveEntity(e, wx, wy, wz));
+        else vol.removeBlockEntity(wx, wy, wz);
       }
     }
   }
   return changed;
 }
 
+/**
+ * Recopie une entrée en la replaçant aux coordonnées données. L'original n'est
+ * pas touché : la même entrée sert plusieurs fois quand un `stack` la répète.
+ */
+function moveEntity(entry, x, y, z) {
+  const copy = structuredClone(entry);
+  copy.x = { type: 'int', value: x };
+  copy.y = { type: 'int', value: y };
+  copy.z = { type: 'int', value: z };
+  return copy;
+}
+
 function fillSelection(vol, sel, block) {
   let changed = 0;
+  // Remplir une zone efface ce qui s'y trouvait, entrées comprises : vider un
+  // coffre de la grille en laissant son contenu ferait réapparaître le contenu
+  // sous le bloc suivant.
+  const porte = !!vol.removeBlockEntity;
   for (let y = sel.min.y; y <= sel.max.y; y++) {
     for (let z = sel.min.z; z <= sel.max.z; z++) {
       for (let x = sel.min.x; x <= sel.max.x; x++) {
         const before = vol.getBlock(x, y, z);
         if (!sameBlock(before, block)) { vol.setBlock(x, y, z, block ? clone(block) : null); changed++; }
+        if (porte) vol.removeBlockEntity(x, y, z);
       }
     }
   }

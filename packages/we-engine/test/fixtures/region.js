@@ -1,6 +1,6 @@
 import {
   writeRegion, readRegion, decodeChunk, chunkSections, readSection,
-  encodeBlockStates, localIndex, SECTION_VOLUME,
+  encodeBlockStates, localIndex, SECTION_VOLUME, chunkBlockEntities, blockEntityPos,
 } from '../../src/anvil/index.js';
 
 // Fabrique de régions .mca pour les tests : pas de fixture binaire dans le
@@ -12,7 +12,7 @@ import {
  * MONDE (x,z ∈ 0..15 ; y quelconque, la section est déduite).
  * @param {{x,y,z,Name,Properties?}[]} blocks
  */
-export function buildRegion(blocks, { dataVersion = 2860 } = {}) {
+export function buildRegion(blocks, { dataVersion = 2860, blockEntities = [] } = {}) {
   const bySection = new Map();
   for (const b of blocks) {
     const sy = Math.floor(b.y / 16);
@@ -46,7 +46,22 @@ export function buildRegion(blocks, { dataVersion = 2860 } = {}) {
         xPos: { type: 'int', value: 0 }, yPos: { type: 'int', value: 0 }, zPos: { type: 'int', value: 0 },
         Status: { type: 'string', value: 'minecraft:full' },
         sections: { type: 'list', value: { type: 'compound', value: sections } },
-        block_entities: { type: 'list', value: { type: 'compound', value: [] } },
+        // Les block entities portent leurs coordonnées MONDE et un contenu
+        // qu'on ne cherche pas à interpréter — ici un champ témoin suffit à
+        // vérifier qu'il traverse les opérations intact.
+        block_entities: {
+          type: 'list',
+          value: {
+            type: 'compound',
+            value: blockEntities.map((be) => ({
+              id: { type: 'string', value: be.id },
+              x: { type: 'int', value: be.x },
+              y: { type: 'int', value: be.y },
+              z: { type: 'int', value: be.z },
+              ...(be.marque !== undefined ? { marque: { type: 'string', value: be.marque } } : {}),
+            })),
+          },
+        },
       },
     },
   };
@@ -69,6 +84,21 @@ export async function readBack(buffer, { regionX = 0, regionZ = 0 } = {}) {
         const y = Y * 16 + ((n >> 8) & 15);
         out.set(`${x},${y},${z}`, e);
       }
+    }
+  }
+  return out;
+}
+
+/** Relit les block entities d'une région, en Map("x,y,z" → { id, marque }). */
+export async function readBackEntities(buffer, { regionX = 0, regionZ = 0 } = {}) {
+  const region = readRegion(buffer, regionX, regionZ);
+  const out = new Map();
+  for (const chunk of region.chunks) {
+    await decodeChunk(chunk);
+    for (const e of chunkBlockEntities(chunk)) {
+      const p = blockEntityPos(e);
+      if (!p) continue;
+      out.set(`${p.x},${p.y},${p.z}`, { id: e.id?.value, marque: e.marque?.value });
     }
   }
   return out;
