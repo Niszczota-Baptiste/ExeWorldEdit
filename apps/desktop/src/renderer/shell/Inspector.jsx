@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Play, Settings2, Undo2, Redo2, FileDown, Globe, AlertTriangle } from './icons.js';
 import { OPERATIONS } from '@titi/we-engine/operations';
 import { useApp, TOOL_OPS, TOOLS } from '../store.js';
@@ -60,6 +60,11 @@ export default function Inspector() {
     <section className="side-panel" style={{ flex: 1 }}>
       <Head icon={<Settings2 size={13} />} title={toolMeta?.label || 'Inspecteur'} />
       <div className="panel-body">
+        {/* La sélection d'abord : c'est SUR QUOI on opère, donc ça précède le
+            choix de l'opération. Reléguée en bas, elle passait sous la ligne de
+            flottaison du panneau et devenait introuvable. */}
+        <Selection selection={selection} />
+
         {ops.length > 0 && (
           <div className="field">
             <label htmlFor="op">Opération</label>
@@ -101,7 +106,6 @@ export default function Inspector() {
 
         <Export project={project} onExport={exportBuild} />
         <ApplyToWorld project={project} onApply={applyToWorld} />
-        <Selection selection={selection} />
       </div>
     </section>
   );
@@ -222,32 +226,105 @@ function Field({ p, value, onChange, block }) {
   );
 }
 
+/**
+ * Sélection ÉDITABLE.
+ *
+ * Il n'y a pas encore de sélection à la souris (phase 2.5) : sans champs, la
+ * sélection restait bloquée sur l'emprise du build et l'application était
+ * inutilisable pour éditer une zone précise. Six nombres suffisent — ce sont
+ * ceux que Minecraft affiche sur F3.
+ *
+ * La saisie est validée à la sortie du champ, pas à la frappe : taper « -12 »
+ * passe par « - », qui n'est pas un nombre.
+ */
 function Selection({ selection }) {
+  const setSelection = useApp((s) => s.setSelection);
+  const project = useApp((s) => s.project());
+
   if (!selection) return null;
+
   const size = {
     x: selection.max.x - selection.min.x + 1,
     y: selection.max.y - selection.min.y + 1,
     z: selection.max.z - selection.min.z + 1,
   };
+
+  const commit = (coin, axe, brut) => {
+    const n = Math.round(Number(brut));
+    if (!Number.isFinite(n)) return;
+    const next = {
+      min: { ...selection.min },
+      max: { ...selection.max },
+      shape: selection.shape,
+    };
+    next[coin][axe] = n;
+    // Coins inversés : on remet dans l'ordre plutôt que de refuser. Saisir
+    // « de 100 à 20 » veut manifestement dire « de 20 à 100 ».
+    for (const a of ['x', 'y', 'z']) {
+      if (next.min[a] > next.max[a]) {
+        const t = next.min[a]; next.min[a] = next.max[a]; next.max[a] = t;
+      }
+    }
+    setSelection(next);
+  };
+
+  const tout = () => {
+    if (!project?.extent) return;
+    setSelection({ min: { ...project.extent.min }, max: { ...project.extent.max }, shape: selection.shape });
+  };
+
+  const trop = project?.limits && (
+    selection.min.x < project.limits.min.x || selection.max.x > project.limits.max.x
+    || selection.min.y < project.limits.min.y || selection.max.y > project.limits.max.y
+    || selection.min.z < project.limits.min.z || selection.max.z > project.limits.max.z
+  );
+
   return (
-    <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--line-soft)' }}>
-      <label style={{ display: 'block', marginBottom: 6, color: 'var(--text-dim)', fontSize: 'var(--t-micro)' }}>
+    <div className="sel">
+      <label>
         Sélection
+        <button className="sel-all" onClick={tout} title="Prendre tout le build">tout le build</button>
       </label>
-      <div style={{ display: 'grid', gap: 3, fontSize: 'var(--t-micro)', color: 'var(--text-faint)' }}>
-        <Coord label="De" v={selection.min} />
-        <Coord label="À" v={selection.max} />
-        <div style={{ marginTop: 3, color: 'var(--select)' }}>
-          {size.x} × {size.y} × {size.z} — {(size.x * size.y * size.z).toLocaleString('fr-FR')} blocs
-        </div>
+
+      <div className="sel-grid">
+        <span />
+        <span className="sel-axis">X</span>
+        <span className="sel-axis">Y</span>
+        <span className="sel-axis">Z</span>
+        {['min', 'max'].map((coin) => (
+          <Fragment key={coin}>
+            <span className="sel-row">{coin === 'min' ? 'De' : 'À'}</span>
+            {['x', 'y', 'z'].map((axe) => (
+              <SelField key={axe} value={selection[coin][axe]} onCommit={(v) => commit(coin, axe, v)} />
+            ))}
+          </Fragment>
+        ))}
       </div>
+
+      <div className="sel-size">
+        {size.x} × {size.y} × {size.z} — {(size.x * size.y * size.z).toLocaleString('fr-FR')} blocs
+      </div>
+      {trop && <div className="sel-warn">Hors des limites du build : l’opération sera refusée.</div>}
     </div>
   );
 }
 
-const Coord = ({ label, v }) => (
-  <div style={{ display: 'flex', gap: 8 }}>
-    <span style={{ width: 16 }}>{label}</span>
-    <span style={{ color: 'var(--text-dim)' }}>{v.x} · {v.y} · {v.z}</span>
-  </div>
-);
+/** Un nombre de la sélection. Réaffiche la valeur retenue, pas la saisie. */
+function SelField({ value, onCommit }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => { setDraft(String(value)); }, [value]);
+  const commit = () => {
+    if (draft.trim() === '' || !Number.isFinite(Number(draft))) { setDraft(String(value)); return; }
+    onCommit(draft);
+  };
+  return (
+    <input
+      className="input sel-input"
+      value={draft}
+      inputMode="numeric"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+    />
+  );
+}

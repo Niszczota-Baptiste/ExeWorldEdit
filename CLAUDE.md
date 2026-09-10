@@ -168,6 +168,15 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   donnée qui arrive plus tard va dans un effet.
 - **Une grille en `1fr` s'étire.** La carte des régions doit garder ses
   proportions de monde : colonnes à taille fixe, jamais `1fr`.
+- **Une `BrowserWindow` détruite est un objet VRAI.** `win?.webContents` ne
+  protège de rien : le `?.` ne voit qu'un `null`. Tout envoi au renderer depuis
+  un processus qui survit à la fenêtre (le moteur, un minuteur) doit passer par
+  `win.isDestroyed()`.
+- **Sous Windows, `titleBarOverlay` dessine les boutons système PAR-DESSUS la
+  barre de titre**, sans que l'application le sache. Ce qui est à droite finit
+  dessous, invisible et incliquable. Réserver la place avec
+  `env(titlebar-area-width)`. Invisible sous Linux — donc dans toutes les
+  captures de la documentation.
 - **Ce qui est bundlé ne doit PAS être en `dependencies`.** electron-builder
   embarque toujours les dépendances de production, quels que soient les motifs
   `files:` — et Vite avait déjà mis `react`, `three` et le reste dans

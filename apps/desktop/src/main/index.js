@@ -87,11 +87,25 @@ function createWindow() {
   const startupPath = pendingOpen();
   if (startupPath) {
     win.webContents.once('did-finish-load', () => {
-      win.webContents.send('engine:event', { event: 'open-path', path: startupPath });
+      sendToRenderer({ event: 'open-path', path: startupPath });
     });
   }
 
   return win;
+}
+
+/**
+ * Envoie un message au renderer, s'il y a encore quelqu'un pour l'entendre.
+ *
+ * `win?.` ne suffit PAS : une fenêtre détruite reste un objet parfaitement
+ * vrai, et toucher son `webContents` lève « Object has been destroyed ». Le
+ * moteur tourne dans son propre processus et peut très bien répondre après la
+ * fermeture de la fenêtre — c'est même le cas normal quand on quitte pendant
+ * une opération. Sans ce garde, quitter affiche une boîte d'erreur.
+ */
+function sendToRenderer(msg) {
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
+  win.webContents.send('engine:event', msg);
 }
 
 /**
@@ -119,9 +133,7 @@ app.whenReady().then(async () => {
     res: path.join(ROOT, 'assets'),
   });
 
-  engine = startEngine({
-    onEvent: (msg) => win?.webContents.send('engine:event', msg),
-  });
+  engine = startEngine({ onEvent: sendToRenderer });
   await engine.whenReady;
 
   // Un seul canal vers le moteur : le preload n'expose qu'une liste blanche de

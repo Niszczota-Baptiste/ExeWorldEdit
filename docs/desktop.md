@@ -845,6 +845,66 @@ wine.
 
 ---
 
+## Quatre défauts que seul un vrai lancement révèle
+
+L'exe construit, les premières minutes d'usage réel ont sorti quatre choses
+qu'aucun test ni aucune capture sans écran n'avait attrapées.
+
+### Une fenêtre détruite reste un objet vrai
+
+```
+TypeError: Object has been destroyed
+  at ForkUtilityProcess.<anonymous>
+```
+
+Le relais des événements du moteur faisait `win?.webContents.send(...)`. Le
+`?.` ne protège que d'un `null` — une `BrowserWindow` détruite est parfaitement
+vraie, et toucher son `webContents` lève. Le moteur tourne dans son propre
+processus et répond volontiers après la fermeture de la fenêtre : quitter
+pendant une opération affichait donc une boîte d'erreur. Le garde correct est
+`win.isDestroyed()`.
+
+### Les boutons de la barre de titre étaient SOUS les boutons de Windows
+
+`titleBarOverlay` dessine « réduire / agrandir / fermer » **par-dessus** la
+barre de titre, et l'application n'en sait rien : elle s'étend dessous. Les
+deux boutons de droite — réglages et relevé de performance — étaient donc
+invisibles et incliquables, et les réglages inatteignables.
+
+Chromium expose la zone réellement disponible ; la réserver tient en une ligne :
+
+```css
+padding-right: calc(100% - env(titlebar-area-width, 100%) - env(titlebar-area-x, 0px));
+```
+
+Hors Windows, `env()` retombe sur ses valeurs par défaut et la réserve vaut zéro.
+Ce défaut est invisible sous Linux, où il n'y a pas d'overlay — donc invisible
+dans toutes les captures de cette documentation.
+
+### On ne pouvait plus ouvrir de fichier
+
+Les boutons « Ouvrir » vivaient sur l'écran d'accueil… qui disparaît dès qu'un
+projet est ouvert. Restait `Ctrl O`, qui ne se devine pas. Deux actions en tête
+du rail d'outils règlent ça — elles y sont visibles en permanence.
+
+### La sélection ne se modifiait pas
+
+La documentation affirmait qu'elle était « modifiable dans l'inspecteur ». Elle
+ne l'était pas : le composant AFFICHAIT « De / À » sans le moindre champ. Sans
+sélection à la souris, la sélection restait donc bloquée sur l'emprise du build,
+et l'application inutilisable pour éditer une zone précise.
+
+Six champs, disposés comme le F3 — une colonne par axe, une ligne par coin — et
+un raccourci « tout le build ». Des coins donnés à l'envers sont remis dans
+l'ordre plutôt que refusés : saisir « de 100 à 20 » veut manifestement dire
+« de 20 à 100 ».
+
+Elle est passée en **tête** de l'inspecteur. En bas, elle tombait sous la ligne
+de flottaison du panneau — présente, mais introuvable. C'est le contexte de tout
+le reste : elle précède le choix de l'opération.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
@@ -935,8 +995,8 @@ mélangé passerait les tests de rejouabilité et produirait quand même des ban
 - **Pas de modèles non cubiques** : escaliers, dalles et quarts de bloc
   `minefield:*` sont rendus en cube plein. C'est la vraie limite du greedy
   meshing, et le gros du travail de la 2.5.
-- **Pas de sélection à la souris ni de gizmos** : la sélection par défaut est
-  l'emprise du contenu, modifiable dans l'inspecteur seulement.
+- **Pas de sélection à la souris ni de gizmos** : elle se saisit en chiffres
+  dans l'inspecteur, six nombres comme ceux du F3. Phase 2.5.
 - **Pas de palette de commandes** (`Ctrl+K`), pas de thème clair, pas d'onglets
   multiples réellement ouvrables.
 
