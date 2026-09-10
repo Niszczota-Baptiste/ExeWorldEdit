@@ -411,6 +411,8 @@ export class RegionStore {
     const blocks = [];
     let count = 0;
     let truncated = false;
+    let bx0 = Infinity, by0 = Infinity, bz0 = Infinity;
+    let bx1 = -Infinity, by1 = -Infinity, bz1 = -Infinity;
     const idxOf = (name, props) => {
       const key = `${name}|${propsKey(props)}`;
       let i = index.get(key);
@@ -444,6 +446,13 @@ export class RegionStore {
             blocks.push(x - bbox.min.x, y - bbox.min.y, z - bbox.min.z, idxOf(e.Name, e.Properties));
             counts.set(e.Name, (counts.get(e.Name) || 0) + 1);
             count++;
+            // Bornes du CONTENU, distinctes de la boîte demandée : sans elles,
+            // impossible de resserrer une emprise sur ce qu'elle contient
+            // vraiment. Un `.mca` isolé garderait ses 512 × 384 × 512, et son
+            // build apparaîtrait minuscule au centre du vide.
+            if (x < bx0) bx0 = x; if (x > bx1) bx1 = x;
+            if (y < by0) by0 = y; if (y > by1) by1 = y;
+            if (z < bz0) bz0 = z; if (z > bz1) bz1 = z;
           }
         }
       }
@@ -451,6 +460,18 @@ export class RegionStore {
     const bom = [...counts.entries()].map(([blockId, c]) => ({ blockId, count: c })).sort((a, b) => b.count - a.count);
     return {
       palette, blocks, bom, count, truncated,
+      /**
+       * Boîte englobante des blocs TROUVÉS, ou `null` s'il n'y en a aucun.
+       * À ne pas confondre avec `min`/`size`, qui décrivent la boîte
+       * DEMANDÉE — c'est-à-dire le repère des coordonnées de `blocks`.
+       *
+       * Tronqué, elle ne couvre que ce qui a été émis : c'est une borne
+       * inférieure, jamais un mensonge.
+       */
+      bounds: count ? {
+        min: { x: bx0, y: by0, z: bz0 },
+        max: { x: bx1, y: by1, z: bz1 },
+      } : null,
       min: { x: bbox.min.x, y: bbox.min.y, z: bbox.min.z },
       size: { x: bbox.max.x - bbox.min.x + 1, y: bbox.max.y - bbox.min.y + 1, z: bbox.max.z - bbox.min.z + 1 },
     };

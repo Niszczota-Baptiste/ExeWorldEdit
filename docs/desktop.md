@@ -948,6 +948,40 @@ Deux points de conception :
 
 ---
 
+## L'emprise ne se resserrait jamais
+
+Ouvrir un `.mca` isolé donnait une emprise de **512 × 384 × 512** quel que soit
+son contenu. Un petit build apparaissait donc minuscule au centre du vide — la
+caméra cadrait correctement une boîte qui, elle, était fausse — et la sélection
+par défaut couvrait cent millions de cases dont la quasi-totalité étaient de
+l'air.
+
+`rescanExtent` prétendait « resserrer l'emprise sur les blocs réellement
+présents ». Il ne le faisait pas, et ne pouvait pas : `deriveSparse` renvoie
+`min` / `size` de la boîte **DEMANDÉE** — c'est le repère des coordonnées de
+`blocks`, pas une description du contenu. Resserrer dessus est un
+non-changement.
+
+`deriveSparse` rend maintenant aussi `bounds` : la boîte englobante des blocs
+**trouvés**, ou `null` s'il n'y en a aucun (et non une boîte inversée à
+l'infini, qui se propagerait en silence). Les deux ne peuvent pas se confondre,
+et le commentaire le dit à l'endroit du code où l'on choisit.
+
+Sur une région de 512 contenant un build de 40 × 10 × 30 :
+
+```
+boîte demandée : 512 × 101 × 512
+blocs trouvés  :  40 ×  10 ×  30
+```
+
+Tronquée, `bounds` ne couvre que ce qui a été émis : c'est une borne inférieure,
+jamais un mensonge.
+
+Cela change aussi la **sélection par défaut**, qui vaut l'emprise : elle tombe
+maintenant sur le build plutôt que sur la région entière.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed

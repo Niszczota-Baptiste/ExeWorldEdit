@@ -97,15 +97,12 @@ const methods = {
     const store = staging.loadStore(p);
     await store.warmup(buildLimits(p, staging.limits));
     const sparse = store.deriveSparse(buildLimits(p, staging.limits), staging.limits.previewMaxBlocks, { truncate: true });
-    if (!sparse.count) return projectState(p);
-    adapter.saveExtent(id, {
-      min: sparse.min,
-      max: {
-        x: sparse.min.x + sparse.size.x - 1,
-        y: sparse.min.y + sparse.size.y - 1,
-        z: sparse.min.z + sparse.size.z - 1,
-      },
-    });
+    if (!sparse.count || !sparse.bounds) return projectState(p);
+    // `sparse.bounds` = les blocs TROUVÉS ; `sparse.min`/`size` = la boîte
+    // demandée. Prendre la seconde laissait un `.mca` isolé à 512 × 384 × 512
+    // quel que soit son contenu : le build apparaissait minuscule au centre du
+    // vide, et la sélection par défaut couvrait cent millions de cases vides.
+    adapter.saveExtent(id, sparse.bounds);
     await staging.regenPreview(project(id));
     return projectState(project(id));
   },

@@ -168,6 +168,10 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   donnée qui arrive plus tard va dans un effet.
 - **Une grille en `1fr` s'étire.** La carte des régions doit garder ses
   proportions de monde : colonnes à taille fixe, jamais `1fr`.
+- **`deriveSparse` rend la boîte DEMANDÉE, pas celle du contenu.** `min`/`size`
+  sont le repère des coordonnées de `blocks` ; les bornes du contenu sont dans
+  `bounds` (ou `null`). Resserrer une emprise sur `min`/`size` est un
+  non-changement — c'est ce qui laissait un `.mca` isolé à 512 × 384 × 512.
 - **Un nom de fichier n'est pas une source de vérité.** `r.0.0 (16).mca` (le
   doublon de téléchargement de Windows) faisait échouer l'ouverture. Le contenu
   d'un `.mca` porte ses propres coordonnées : `regionCoordsFromContent`. Le nom

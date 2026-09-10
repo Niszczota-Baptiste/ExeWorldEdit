@@ -1103,3 +1103,40 @@ test('resolveRegionCoords préfère le nom, et retombe sur le contenu', async ()
   // Et rien de lisible nulle part : on le dit, on ne devine pas.
   assert.equal(await staging.resolveRegionCoords('inconnu.mca', Buffer.from('vide')), null);
 });
+
+// ── Emprise resserrée sur le contenu ────────────────────────────────────────
+
+test('deriveSparse distingue la boîte DEMANDÉE des blocs TROUVÉS', async () => {
+  const { RegionStore } = await import('../src/worldedit/regionStore.js');
+  // Quatre blocs groupés dans un coin d'une région de 512.
+  const store = new RegionStore([{
+    regionX: 0, regionZ: 0,
+    buffer: buildRegion([
+      { x: 3, y: 4, z: 5, Name: STONE },
+      { x: 6, y: 4, z: 5, Name: STONE },
+      { x: 3, y: 9, z: 8, Name: OAK },
+    ]),
+  }]);
+  const box = { min: { x: 0, y: 0, z: 0 }, max: { x: 15, y: 15, z: 15 } };
+  await store.warmup(box);
+  const sparse = store.deriveSparse(box, 1e6, { truncate: true });
+
+  // La boîte demandée reste le repère des coordonnées de `blocks`.
+  assert.deepEqual(sparse.min, { x: 0, y: 0, z: 0 });
+  assert.deepEqual(sparse.size, { x: 16, y: 16, z: 16 });
+  // Les bornes du contenu, elles, serrent les trois blocs.
+  assert.deepEqual(sparse.bounds, {
+    min: { x: 3, y: 4, z: 5 },
+    max: { x: 6, y: 9, z: 8 },
+  });
+});
+
+test('une zone vide n’invente pas de bornes', async () => {
+  const { RegionStore } = await import('../src/worldedit/regionStore.js');
+  const store = new RegionStore([{ regionX: 0, regionZ: 0, buffer: buildRegion([{ x: 0, y: 0, z: 0, Name: STONE }]) }]);
+  const vide = { min: { x: 8, y: 8, z: 8 }, max: { x: 15, y: 15, z: 15 } };
+  await store.warmup({ min: { x: 0, y: 0, z: 0 }, max: { x: 15, y: 15, z: 15 } });
+  const sparse = store.deriveSparse(vide, 1e6, { truncate: true });
+  assert.equal(sparse.count, 0);
+  assert.equal(sparse.bounds, null, 'null, pas une boîte inversée à l’infini');
+});
