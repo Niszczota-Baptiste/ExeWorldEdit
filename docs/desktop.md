@@ -428,6 +428,57 @@ renderer. Phase 1.2 également.
 
 ---
 
+## Le chemin chaud du `RegionStore`
+
+Le bench annonçait un écart de 7× entre lecture et écriture : `setBlock` à
+1,1 M/s contre `getBlock` à 7,8 M/s. Le profileur a dit exactement pourquoi.
+
+| poste | part du temps d'écriture |
+|---|---|
+| `propsKey` (clé texte des états) | 22 % |
+| le rappel du `findIndex` sur la palette | 14 % |
+| `_chunkRec` + `_regionAt` (clés texte de chunk) | 12 % |
+| ramasse-miettes (les chaînes jetées ci-dessus) | 5 % |
+
+`setBlock` **refabriquait la clé texte de chaque entrée de palette, à chaque
+bloc** : pour une palette de dix entrées, onze allocations de chaîne par bloc
+écrit.
+
+Trois corrections, dans cet ordre de gain :
+
+1. **Index de palette en `Map`**, construit une fois par section et tenu à jour
+   à l'ajout. Une clé fabriquée et une recherche par bloc, au lieu de 1 + N.
+   `grid.palette` n'est modifiée qu'à un seul endroit, ce qui rend l'index
+   impossible à désynchroniser tant que ça reste vrai.
+2. **Mémo d'une case sur la section résolue.** Les opérations parcourent en
+   YZX, donc seize blocs consécutifs tombent dans la même section : une seule
+   case suffit à supprimer `_chunkRec` et `_regionAt` du profil. Le mémo profite
+   aussi à `getBlock`, qui n'était pourtant pas la cible.
+3. **Un bloc sans état rend son nom comme clé**, sans concaténation. C'est
+   l'écrasante majorité des blocs d'un build. `{}` et `null` rendent la même
+   clé, sinon un bloc décrit des deux façons occuperait deux entrées de palette.
+
+### Résultat
+
+| scénario | référence | après | |
+|---|---|---|---|
+| `store-setblock` | 983 ms | 284 ms | **× 3,5** |
+| `store-getblock` | 135 ms | 48 ms | **× 2,8** |
+| `set-10M` | 6 590 ms | 984 ms | **× 6,7** |
+| `replace` | 2 092 ms | 326 ms | **× 6,4** |
+| `naturalize` | 2 254 ms | 625 ms | **× 3,6** |
+| `mirror-rotate` | 9 312 ms | 5 190 ms | **× 1,8** |
+| `mix` | 2 773 ms | 2 148 ms | × 1,3 |
+
+`set-10M` passe de 1,7 à 10,7 M/s. `mix` gagne le moins : son coût est ailleurs
+(le tirage pondéré lui-même), ce que le profil confirmera si on y revient.
+
+Ce qui reste : `getBlock` alloue toujours un objet `{ Name, Properties }` par
+appel. Le supprimer demanderait une interface à identifiants entiers, donc de
+toucher `transform.js` entier — un autre chantier.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
@@ -498,9 +549,8 @@ mélangé passerait les tests de rejouabilité et produirait quand même des ban
 - **L'export avec décalage re-chunke** et perd au passage les block-entities
   (contenu des coffres, texte des panneaux) et les biomes. L'export sans
   décalage, lui, est lossless. Phase 1.3.
-- **`RegionStore` est lent sur le chemin chaud** : `setBlock` fabrique une clé
-  texte et fait un `findIndex` sur la palette de section à chaque bloc,
-  `getBlock` alloue un objet par appel. Phase 1.2.
+- **`getBlock` alloue un objet par appel** (`{ Name, Properties }`). Le reste du
+  chemin chaud est traité (voir « Le chemin chaud du `RegionStore` »).
 - **Un seul fil d'exécution.** Pas de pool de workers. Phase 1.2.
 - **L'aperçu se resérialise en entier** à chaque opération, même pour un bloc
   changé : `JSON.stringify` + gzip forment un plancher d'environ 120 ms. Le

@@ -18,13 +18,68 @@ const AIR = { Name: 'minecraft:air', Properties: null };
 const fdiv = (a, b) => Math.floor(a / b);
 const fmod = (a, b) => ((a % b) + b) % b;
 const isAir = (b) => !b || AIR_NAMES.has(b.Name);
-const propsKey = (p) => (p ? Object.keys(p).sort().map((k) => `${k}=${p[k]}`).join(',') : '');
+const propsKey = (p) => {
+  if (!p) return '';
+  const ks = Object.keys(p);
+  if (ks.length === 0) return '';
+  if (ks.length === 1) return `${ks[0]}=${p[ks[0]]}`;
+  ks.sort();
+  let out = '';
+  for (let i = 0; i < ks.length; i++) out += `${i ? ',' : ''}${ks[i]}=${p[ks[i]]}`;
+  return out;
+};
+
+/**
+ * Clé d'identité d'un bloc dans une palette de section.
+ *
+ * Un bloc SANS état rend son nom tel quel : pas de concaténation, donc pas
+ * d'allocation. C'est le cas de l'écrasante majorité des blocs d'un build
+ * (pierre, terre, cobble…), et `propsKey` pesait encore 18 % de l'écriture
+ * après le reste des optimisations.
+ *
+ * Les deux formes ne peuvent pas se confondre : un nom Minecraft est
+ * `namespace:id` et ne contient jamais de barre verticale, donc « avec état »
+ * en contient toujours une et « sans état » jamais.
+ */
+const entryKey = (name, props) => {
+  const k = propsKey(props);
+  // `{}` et `null` doivent rendre la MÊME clé, sinon un bloc sans état
+  // décrit des deux façons occuperait deux entrées de palette.
+  return k ? `${name}|${k}` : name;
+};
+
+/**
+ * Index « clé de palette → position », construit une fois par section et tenu à
+ * jour à chaque ajout.
+ *
+ * Avant, `setBlock` faisait un `findIndex` qui REFABRIQUAIT la clé texte de
+ * chaque entrée de palette, à chaque bloc : mesuré au profileur, 44 % du temps
+ * d'écriture partait là (`propsKey` 22 %, le rappel du `findIndex` 14 %, plus
+ * le ramasse-miettes qui suivait). L'index ramène ça à une clé construite et
+ * une recherche par bloc.
+ *
+ * `grid.palette` n'est modifiée qu'ici (vérifié) : l'index ne peut pas se
+ * désynchroniser tant que ça reste vrai.
+ */
+function paletteIndex(grid) {
+  let idx = grid.index;
+  if (!idx) {
+    idx = new Map();
+    for (let i = 0; i < grid.palette.length; i++) {
+      const e = grid.palette[i];
+      idx.set(entryKey(e.Name, e.Properties), i);
+    }
+    grid.index = idx;
+  }
+  return idx;
+}
 
 export class RegionStore {
   // sources = [{ regionX, regionZ, buffer }]
   constructor(sources) {
     this.regions = new Map(); // "rx,rz" -> { region, chunks:Map("cx,cz"->rec) }
     this.sources = sources;
+    this._memo = null; // dernière section résolue (voir `_resolve`)
     for (const s of sources) {
       this.regions.set(`${s.regionX},${s.regionZ}`, {
         regionX: s.regionX, regionZ: s.regionZ,
@@ -41,6 +96,9 @@ export class RegionStore {
 
   // Décode les chunks/sections intersectant la boîte (coords monde, inclusive).
   async warmup(bbox) {
+    // Le warmup peuple `rec.sections` : ce que le mémo tenait avant peut ne
+    // plus être la bonne instance.
+    this._forgetMemo();
     const cminX = fdiv(bbox.min.x, 16), cmaxX = fdiv(bbox.max.x, 16);
     const cminZ = fdiv(bbox.min.z, 16), cmaxZ = fdiv(bbox.max.z, 16);
     for (const r of this.regions.values()) {
@@ -77,9 +135,26 @@ export class RegionStore {
     return r.chunks.get(`${cx},${cz}`) || null;
   }
 
-  _section(cx, cz, sy, create = false) {
-    const rec = this._chunkRec(cx, cz);
+  /**
+   * Résout (chunk, section, région) d'un coup, avec mémo d'UNE case.
+   *
+   * Les opérations parcourent en YZX : x varie le plus vite, donc seize blocs
+   * consécutifs tombent dans la même section. Sans mémo, chacun refait deux
+   * recherches sur des clés texte fabriquées à la volée — 12 % du temps
+   * d'écriture au profileur. Une seule case suffit à absorber ça.
+   *
+   * On ne mémorise que les succès : un échec (section absente, `create` faux)
+   * ne doit pas empêcher une création ultérieure de la trouver.
+   */
+  _resolve(cx, cz, sy, create = false) {
+    const m = this._memo;
+    if (m !== null && m.cx === cx && m.cz === cz && m.sy === sy) return m;
+
+    const region = this._regionAt(cx, cz);
+    if (!region || !region.chunks) return null;
+    const rec = region.chunks.get(`${cx},${cz}`);
     if (!rec || !rec.sections) return null;
+
     let sec = rec.sections.get(sy);
     if (!sec && create) {
       sec = {
@@ -89,7 +164,18 @@ export class RegionStore {
       };
       rec.sections.set(sy, sec);
     }
-    return sec || null;
+    if (!sec) return null;
+
+    const hit = { cx, cz, sy, sec, rec, region };
+    this._memo = hit;
+    return hit;
+  }
+
+  /** Le mémo devient faux dès qu'on remplace des sections. */
+  _forgetMemo() { this._memo = null; }
+
+  _section(cx, cz, sy, create = false) {
+    return this._resolve(cx, cz, sy, create)?.sec || null;
   }
 
   getBlock(x, y, z) {
@@ -101,23 +187,29 @@ export class RegionStore {
   }
 
   setBlock(x, y, z, block) {
-    const cx = fdiv(x, 16), cz = fdiv(z, 16);
-    const rec = this._chunkRec(cx, cz);
     // Hors des chunks chargés (= hors du build) : on ignore l'écriture (clamp).
     // Le warmup couvre tout le build, donc seuls les débordements stack/sphère
     // au-delà des régions existantes sont concernés.
-    if (!rec || !rec.sections) return;
-    const sec = this._section(cx, cz, fdiv(y, 16), true);
+    const hit = this._resolve(fdiv(x, 16), fdiv(z, 16), fdiv(y, 16), true);
+    if (!hit) return;
+    const { sec, rec, region } = hit;
+
     const entry = isAir(block) ? AIR : { Name: block.Name, Properties: block.Properties || null };
-    const key = `${entry.Name}|${propsKey(entry.Properties)}`;
-    let pi = sec.grid.palette.findIndex((p) => `${p.Name}|${propsKey(p.Properties)}` === key);
-    if (pi < 0) { pi = sec.grid.palette.length; sec.grid.palette.push(entry); }
+    const key = entryKey(entry.Name, entry.Properties);
+    const idx = paletteIndex(sec.grid);
+    let pi = idx.get(key);
+    if (pi === undefined) {
+      pi = sec.grid.palette.length;
+      sec.grid.palette.push(entry);
+      idx.set(key, pi);
+    }
+
     const i = localIndex(fmod(x, 16), fmod(y, 16), fmod(z, 16));
     if (sec.grid.indices[i] === pi) return;
     sec.grid.indices[i] = pi;
     sec.dirty = true;
     rec.dirty = true;
-    this._regionAt(cx, cz).dirty = true;
+    region.dirty = true;
   }
 
   // Décode (paresseusement) la grille de biomes 4³ d'une section.

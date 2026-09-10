@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (231 tests aujourd'hui : 206 moteur, 25 desktop)
+npm test          # tous les paquets (235 tests aujourd'hui : 210 moteur, 25 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -173,6 +173,11 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
 - **Une clé texte dans une boucle chaude.** Le recollage d'aperçu refabriquait
   `nom|propriétés` par bloc : 317 ms. Une table de correspondance calculée une
   fois par palette ramène la boucle à de l'entier.
+- **Un `findIndex` avec une clé fabriquée dans le comparateur.** `setBlock`
+  refabriquait la clé texte de CHAQUE entrée de palette à chaque bloc : onze
+  allocations par bloc pour une palette de dix. Un index `Map` construit une
+  fois par section : × 3,5. Corollaire : les opérations parcourent en YZX, donc
+  un mémo d'UNE case sur la section résolue supprime les recherches de chunk.
 - **Un normaliseur qui jette ce qu'il ne nomme pas.** `normalizeParams`
   (`worldedit/operations.js`) ne recopie que les paramètres qu'il liste, et le
   cas non personnalisé de `naturalize` faisait `return { preset }`. Ajouter
