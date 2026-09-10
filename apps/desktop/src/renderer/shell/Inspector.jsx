@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Play, Settings2, Undo2, Redo2, Download } from 'lucide-react';
+import { Play, Settings2, Undo2, Redo2, FileDown, Globe, AlertTriangle } from './icons.js';
 import { OPERATIONS } from '@titi/we-engine/operations';
 import { useApp, TOOL_OPS, TOOLS } from '../store.js';
 
@@ -24,6 +24,7 @@ export default function Inspector() {
   const undo = useApp((s) => s.undo);
   const redo = useApp((s) => s.redo);
   const exportBuild = useApp((s) => s.exportBuild);
+  const applyToWorld = useApp((s) => s.applyToWorld);
 
   const ops = TOOL_OPS[tool] || [];
   const spec = byId.get(operation);
@@ -98,13 +99,68 @@ export default function Inspector() {
           </button>
         </div>
 
-        <button className="btn btn-wide" onClick={exportBuild} style={{ marginTop: 8 }}>
-          <Download size={13} /> Exporter en .mca
-        </button>
-
+        <Export project={project} onExport={exportBuild} />
+        <ApplyToWorld project={project} onApply={applyToWorld} />
         <Selection selection={selection} />
       </div>
     </section>
+  );
+}
+
+/**
+ * Les trois sorties, au même endroit. Le `.mca` sort le build entier ; les deux
+ * schematics sortent la SÉLECTION, comme WorldEdit.
+ */
+function Export({ project, onExport }) {
+  return (
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line-soft)' }}>
+      <label style={{ display: 'block', marginBottom: 6, color: 'var(--text-dim)', fontSize: 'var(--t-micro)' }}>
+        Exporter
+      </label>
+      <div className="row">
+        <button className="btn" onClick={() => onExport('mca')} title="Le build entier, sans perte">
+          <FileDown size={13} /> .mca
+        </button>
+        <button className="btn" onClick={() => onExport('schem')} title="La sélection, format Sponge">
+          .schem
+        </button>
+        <button className="btn" onClick={() => onExport('litematic')} title="La sélection, format Litematica">
+          .litematic
+        </button>
+      </div>
+      <p className="hint">
+        Le <code>.mca</code> sort le build entier sans perte. Les schematics sortent la sélection ;
+        WorldEdit ne colle leurs entités qu’avec <code>//paste -e</code>.
+      </p>
+      {project.world && (
+        <p className="hint" style={{ color: 'var(--text-faint)' }}>
+          Ce projet vient de <b>{project.world.path}</b>.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * La seule action irréversible de l'application. Elle est volontairement à
+ * part, en bas, avec sa couleur d'avertissement — et elle n'apparaît que si le
+ * projet vient réellement d'un dossier de monde.
+ */
+function ApplyToWorld({ project, onApply }) {
+  if (!project.world) return null;
+  return (
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line-soft)' }}>
+      <button className="btn btn-wide" data-variant="danger" onClick={onApply}>
+        <Globe size={13} /> Appliquer au monde
+      </button>
+      <p className="hint" style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+        <AlertTriangle size={13} style={{ flex: 'none', marginTop: 1, color: 'var(--select)' }} />
+        <span>
+          Réécrit les régions dans <b>{project.world.path}</b>. Une sauvegarde zip horodatée est prise
+          avant toute écriture, et le monde est refusé s’il est ouvert dans Minecraft.
+        </span>
+      </p>
+    </div>
   );
 }
 

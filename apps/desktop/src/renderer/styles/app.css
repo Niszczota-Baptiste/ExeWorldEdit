@@ -459,3 +459,40 @@
 }
 .empty h1 { margin: 0; font-size: var(--t-title); font-weight: 600; color: var(--text-dim); }
 .empty p { margin: 0; max-width: 340px; font-size: var(--t-small); line-height: 1.6; }
+
+/* ── Dépôt de fichier ─────────────────────────────────────────────────────── */
+
+.drop-veil {
+  position: absolute;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: var(--r-float);
+  background: rgba(30, 35, 41, 0.72);
+  backdrop-filter: blur(3px);
+  z-index: 50;
+  pointer-events: none;
+}
+.drop-card {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  color: var(--accent);
+  text-align: center;
+}
+.drop-card b { font-size: var(--t-body); font-weight: 600; }
+.drop-card span { color: var(--text-faint); font-size: var(--t-micro); }
+
+/* Une action irréversible ne doit pas ressembler aux autres. */
+.btn[data-variant='danger'] {
+  border-color: rgba(224, 104, 94, 0.45);
+  background: rgba(224, 104, 94, 0.12);
+  color: var(--danger);
+  font-weight: 600;
+}
+.btn[data-variant='danger']:hover {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}

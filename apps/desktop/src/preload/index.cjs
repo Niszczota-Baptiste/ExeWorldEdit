@@ -8,12 +8,19 @@ const { contextBridge, ipcRenderer } = require('electron');
 // il ne peut faire que ce qui est écrit ci-dessous.
 
 const ENGINE_METHODS = [
-  'listProjects', 'getProject', 'openFile', 'rescanExtent', 'closeProject',
+  'listProjects', 'getProject', 'closeProject', 'rescanExtent',
+  'openFile', 'openSchematic', 'openWorld',
   'getGeometry',
   'apply', 'undo', 'redo', 'reset', 'audit',
+  'inspectWorld',
   'listSchematics', 'saveSchematic', 'loadSchematic', 'removeSchematic', 'hasClipboard',
   'info',
 ];
+
+// `applyToWorld` et `exportSchematic` ne figurent PAS ici : elles écrivent chez
+// l'utilisateur, donc elles passent par le processus principal, qui demande
+// confirmation et choisit le chemin. Le renderer les déclenche, il ne les
+// exécute pas.
 
 const engine = {};
 for (const method of ENGINE_METHODS) {
@@ -26,7 +33,11 @@ contextBridge.exposeInMainWorld('titi', {
   // Actions qui parlent à l'utilisateur : elles appartiennent au processus
   // principal, le renderer ne fait que les déclencher.
   openBuild: () => ipcRenderer.invoke('shell:openBuild'),
+  openWorldFolder: () => ipcRenderer.invoke('shell:openWorldFolder'),
+  /** Ouvre un chemin déjà connu — glisser-déposer. */
+  openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath),
   saveExport: (opts) => ipcRenderer.invoke('shell:saveExport', opts),
+  applyToWorld: (opts) => ipcRenderer.invoke('shell:applyToWorld', opts),
   window: {
     minimize: () => ipcRenderer.invoke('shell:window', 'minimize'),
     maximize: () => ipcRenderer.invoke('shell:window', 'maximize'),

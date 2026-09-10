@@ -163,6 +163,59 @@ Inchangé depuis le site, et c'est l'invariant central :
 
 ---
 
+## Écrire dans une vraie save
+
+« Appliquer au monde » est la seule action irréversible de l'application. Elle
+suit trois garde-fous, **dans cet ordre** :
+
+1. **Refuser si Minecraft tient le monde.** Le jeu garde un verrou exclusif sur
+   `session.lock` tant qu'un monde est chargé, et écrire dans un monde chargé le
+   corrompt.
+2. **Sauvegarder en zip horodaté** les régions qui vont être réécrites — celles
+   de blocs *et* celles d'entités. Seulement celles-là : archiver un monde entier
+   à chaque application coûterait des gigaoctets pour rien.
+3. **Écrire.**
+
+L'ordre n'est pas négociable, et un test le vérifie explicitement : il relit
+l'archive et exige d'y trouver l'état d'AVANT. Une sauvegarde prise après la
+première écriture ne sauvegarde plus rien.
+
+### Le verrou ne se détecte pas partout pareil
+
+| | Nature du verrou | Détection |
+|---|---|---|
+| **Windows** | obligatoire (système) | fiable — ouvrir `session.lock` en écriture échoue |
+| **Linux, macOS** | consultatif (POSIX) | **impossible** — l'ouverture réussit même monde chargé |
+
+`probeWorldLock` renvoie donc `{ locked, reliable }` plutôt qu'un simple
+booléen. Là où la détection n'est pas fiable, l'application ne fait pas semblant
+de savoir : la confirmation dit franchement qu'elle ne peut pas vérifier et
+demande de fermer le jeu. Windows étant la plateforme visée, la garde est
+effective là où elle compte — mais mentir sur ce qu'on sait ailleurs aurait été
+pire que de l'avouer.
+
+### Ce qui s'ouvre
+
+| Entrée | Devient |
+|---|---|
+| `.mca` | un projet, région seule |
+| `.zip` d'un dossier `region/` | un projet, toutes ses régions |
+| dossier de save (`level.dat` + `region/`) | un projet **avec sa save attachée** — seul cas où « Appliquer au monde » existe |
+| dossier `region/` isolé | un projet, sans save attachée |
+| `.schem` (Sponge), `.litematic` | un projet : régions vierges à la taille du schematic, puis tamponnage |
+
+Un schematic n'a ni chunks ni coordonnées absolues. Plutôt que d'en faire un cas
+particulier que tout le moteur devrait connaître, on lui fabrique des régions et
+on l'y tamponne : le résultat est un build ordinaire, éditable et annulable
+comme les autres. Son offset d'origine est respecté, si bien que le recoller
+sans décalage le remet exactement où il a été pris.
+
+Le glisser-déposer passe par le même point d'entrée que les dialogues : c'est
+l'extension qui choisit la porte. Le renderer ne lit jamais le fichier — il n'en
+transmet que le chemin.
+
+---
+
 ## Écarts assumés avec le moteur du site
 
 | Sujet | Site | Ici | Pourquoi |
@@ -271,7 +324,7 @@ jetable sans toucher au vrai.
 |---|---|---|
 | 0 | Extraire le moteur en package partagé | **fait** |
 | 2.1 | Socle Electron (3 processus, `app://`, IPC en liste blanche) | **fait** |
-| 2.2 | Ouverture et export | ouverture `.mca`/`.zip` et export `.mca` faits ; `.schem`, `.litematic`, glisser-déposer, verrou `session.lock` et sauvegarde horodatée à venir |
+| 2.2 | Ouverture et export | **fait** — `.mca`, `.zip`, dossier de save, dossier `region/`, `.schem`, `.litematic`, glisser-déposer ; export `.mca`/`.schem`/`.litematic` ; « Appliquer au monde » avec verrou `session.lock` et sauvegarde horodatée. Reste : récupération après crash explicite (le staging est déjà persistant) |
 | 2.3 | Direction visuelle (jetons, Pretendard, roue d'outils) | **fait** |
 | 2.4 | Disposition (panneaux, inspecteur généré, palette virtualisée) | fait pour l'essentiel ; `Ctrl+K` et thème clair à venir |
 | 2.5 | Viewport | maillage par chunk + AO **fait** ; atlas de textures et modèles non cubiques à venir |

@@ -564,3 +564,72 @@ test('toute opération déclarée dans le descripteur est réellement branchée'
   const brancheesNonDeclarees = [...branchees].filter((id) => !OPERATION_IDS.has(id));
   assert.deepEqual(brancheesNonDeclarees, [], 'une opération branchée mais non déclarée est inatteignable depuis l’interface');
 });
+
+// ── Ouvrir et écrire des schematics ────────────────────────────────────────
+
+test('un .schem se rouvre comme un projet ordinaire', async () => {
+  const { schematicToRegions, volumeToSchematic } = await import('../src/staging/index.js');
+  const { schematicToSponge } = await import('../src/worldedit/schematicFormats.js');
+  const { MemoryVolume } = await import('../src/worldedit/transform.js');
+
+  // Un petit motif asymétrique : une erreur d'orientation se verrait.
+  const vol = new MemoryVolume();
+  vol.setBlock(0, 0, 0, { Name: STONE, Properties: null });
+  vol.setBlock(2, 0, 0, { Name: OAK, Properties: null });
+  vol.setBlock(0, 1, 0, { Name: OAK, Properties: null });
+  vol.setBlock(0, 0, 3, { Name: STONE, Properties: null });
+  const source = volumeToSchematic(vol, sel({ x: 0, y: 0, z: 0 }, { x: 2, y: 1, z: 3 }));
+
+  const file = await schematicToSponge(source, { name: 'motif' });
+  const out = await schematicToRegions(file, 'motif.schem', { origin: { x: 0, y: 0, z: 0 } });
+
+  assert.deepEqual(out.size, { x: 3, y: 2, z: 4 });
+  assert.equal(out.blockCount, 4, 'les quatre blocs posés, et rien d’autre');
+
+  const at = (x, y, z) => {
+    const i = out.sparse.blocks.findIndex((_, k) => k % 4 === 0
+      && out.sparse.blocks[k] === x && out.sparse.blocks[k + 1] === y && out.sparse.blocks[k + 2] === z);
+    return i < 0 ? null : out.sparse.palette[out.sparse.blocks[i + 3]].name;
+  };
+  assert.equal(at(0, 0, 0), STONE);
+  assert.equal(at(2, 0, 0), OAK, 'le décalage en X est préservé');
+  assert.equal(at(0, 1, 0), OAK, 'et celui en Y aussi');
+  assert.equal(at(0, 0, 3), STONE, 'et celui en Z');
+});
+
+test('un .litematic fait le même aller-retour', async () => {
+  const { schematicToRegions, volumeToSchematic } = await import('../src/staging/index.js');
+  const { schematicToLitematic } = await import('../src/worldedit/schematicFormats.js');
+  const { MemoryVolume } = await import('../src/worldedit/transform.js');
+
+  const vol = new MemoryVolume();
+  vol.setBlock(1, 2, 3, { Name: OAK, Properties: { facing: 'east' } });
+  const source = volumeToSchematic(vol, sel({ x: 0, y: 0, z: 0 }, { x: 3, y: 3, z: 3 }));
+
+  const file = await schematicToLitematic(source, { name: 'essai' });
+  const out = await schematicToRegions(file, 'essai.litematic', { origin: { x: 0, y: 0, z: 0 } });
+  assert.equal(out.blockCount, 1);
+  const e = out.sparse.palette[out.sparse.blocks[3]];
+  assert.equal(e.name, OAK);
+  assert.equal(e.props?.facing, 'east', 'l’état du bloc survit au format');
+});
+
+test('un schematic garde son offset d’origine si on ne lui en impose pas', async () => {
+  const { schematicToRegions, volumeToSchematic } = await import('../src/staging/index.js');
+  const { schematicToSponge } = await import('../src/worldedit/schematicFormats.js');
+  const { MemoryVolume } = await import('../src/worldedit/transform.js');
+
+  const vol = new MemoryVolume();
+  vol.setBlock(100, 70, 200, { Name: STONE, Properties: null });
+  const source = volumeToSchematic(vol, sel({ x: 100, y: 70, z: 200 }, { x: 101, y: 71, z: 201 }));
+
+  const out = await schematicToRegions(await schematicToSponge(source), 'x.schem');
+  // Recoller sans décalage doit remettre le build là où il a été pris.
+  assert.deepEqual(out.origin, { x: 100, y: 70, z: 200 });
+  assert.deepEqual(out.sparse.min, { x: 100, y: 70, z: 200 });
+});
+
+test('un fichier qui n’est pas un schematic est refusé', async () => {
+  const { schematicToRegions } = await import('../src/staging/index.js');
+  await assert.rejects(schematicToRegions(Buffer.from('ceci n’est pas du NBT'), 'x.schem'));
+});

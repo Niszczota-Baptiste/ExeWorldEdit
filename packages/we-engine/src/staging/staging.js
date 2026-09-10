@@ -663,6 +663,8 @@ export function createStaging(adapter, options = {}) {
     materialize,
     seedRegions,
     listRegionFiles,
+    /** Dossier des régions de travail — pour les relire telles quelles. */
+    stagingRegionsDir: regionsDir,
     loadStore,
     templateChunk,
     // opérations

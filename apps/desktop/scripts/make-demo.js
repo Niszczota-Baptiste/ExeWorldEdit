@@ -8,8 +8,12 @@
 //
 //   node scripts/make-demo.js [racine-de-données]
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { FsAdapter } from '@titi/we-engine/storage';
 import { createStaging, blankRegions } from '@titi/we-engine/staging';
+import { readSaveInfo } from '@titi/we-engine/world';
+import { RegionStore } from '@titi/we-engine/worldedit';
 
 const root = process.argv[2] || process.env.TITI_DATA_ROOT;
 if (!root) {
@@ -104,3 +108,55 @@ console.log(`\nEmprise finale : ${p.size.x} × ${p.size.y} × ${p.size.z} à par
 const preview = staging.readPreview(id);
 console.log(`Aperçu : ${preview.count.toLocaleString('fr-FR')} blocs, ${preview.palette.length} entrées de palette${preview.truncated ? ' (partiel)' : ''}`);
 console.log(`Palette dominante : ${preview.bom.slice(0, 6).map((b) => `${b.blockId.replace('minecraft:', '')} ×${b.count}`).join(', ')}`);
+
+// ── Un second projet, issu d'un VRAI dossier de save ────────────────────────
+//
+// Le premier projet vient de régions fabriquées : il n'a pas de monde derrière,
+// donc pas de « Appliquer au monde ». Celui-ci en a un, ce qui permet de voir
+// et d'essayer le chemin d'écriture complet.
+
+const savePath = path.join(root, 'monde-demo', 'Vallée (save)');
+fs.rmSync(path.join(root, 'monde-demo'), { recursive: true, force: true });
+fs.mkdirSync(path.join(savePath, 'region'), { recursive: true });
+fs.mkdirSync(path.join(savePath, 'entities'), { recursive: true });
+fs.writeFileSync(path.join(savePath, 'level.dat'), Buffer.from([0x1f, 0x8b]));
+fs.writeFileSync(path.join(savePath, 'session.lock'), '☃');
+
+{
+  const regions = blankRegions({ origin: { x: 0, y: 60, z: 0 }, size: { x: 64, y: 1, z: 64 } });
+  const store = new RegionStore(regions);
+  const box = { min: { x: 0, y: 60, z: 0 }, max: { x: 63, y: 80, z: 63 } };
+  await store.warmup(box);
+  for (let x = 0; x < 64; x++) {
+    for (let z = 0; z < 64; z++) {
+      store.setBlock(x, 62, z, { Name: 'minecraft:grass_block', Properties: null });
+      store.setBlock(x, 61, z, { Name: 'minecraft:dirt', Properties: null });
+    }
+  }
+  for (const [key, buf] of store.commit({ touchedOnly: false })) {
+    const [rx, rz] = key.split(',').map(Number);
+    fs.writeFileSync(path.join(savePath, 'region', `r.${rx}.${rz}.mca`), buf);
+  }
+}
+
+const info = readSaveInfo(savePath);
+const worldId = 'demo-save';
+adapter.removeProject(worldId);
+adapter.saveProject({
+  id: worldId, name: info.name,
+  min: { x: 0, y: 60, z: 0 }, size: { x: 64, y: 21, z: 64 },
+  world: { path: info.root, kind: info.kind },
+});
+staging.seedRegions(worldId, fs.readdirSync(info.regionDir)
+  .filter((f) => /^r\.-?\d+\.-?\d+\.mca$/.test(f))
+  .map((f) => {
+    const [, rx, rz] = /^r\.(-?\d+)\.(-?\d+)\.mca$/.exec(f);
+    return { regionX: +rx, regionZ: +rz, buffer: fs.readFileSync(path.join(info.regionDir, f)) };
+  }));
+await staging.regenPreview(adapter.getProject(worldId));
+console.log(`\nSave de démonstration : ${savePath}`);
+console.log(`  → projet « ${info.name} », avec « Appliquer au monde » actif.`);
+
+// La vallée redevient le projet le plus récent, donc celui qui s'ouvre : c'est
+// elle qui montre quelque chose. La save reste dans le second onglet.
+adapter.saveProject(adapter.getProject(id));

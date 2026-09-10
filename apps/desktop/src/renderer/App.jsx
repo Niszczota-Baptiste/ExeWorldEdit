@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import { FolderOpen, Layers3 } from 'lucide-react';
+import { FolderOpen, FolderTree, Layers3 } from './shell/icons.js';
 import TitleBar from './shell/TitleBar.jsx';
 import ToolRail from './shell/ToolRail.jsx';
 import Inspector from './shell/Inspector.jsx';
@@ -21,8 +21,36 @@ export default function App() {
   const setWheel = useApp((s) => s.setWheel);
   const undo = useApp((s) => s.undo);
   const redo = useApp((s) => s.redo);
+  const openPath = useApp((s) => s.openPath);
+  const openWorld = useApp((s) => s.openWorld);
+  const [dropping, setDropping] = useState(false);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Glisser-déposer sur toute la fenêtre. Le renderer ne LIT pas le fichier :
+  // il n'en transmet que le chemin, et c'est le processus principal qui décide
+  // quoi en faire. Un renderer sans accès disque le reste.
+  useEffect(() => {
+    const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+    const onOver = (e) => { stop(e); setDropping(true); };
+    const onLeave = (e) => { stop(e); if (e.relatedTarget === null) setDropping(false); };
+    const onDrop = (e) => {
+      stop(e);
+      setDropping(false);
+      const file = e.dataTransfer?.files?.[0];
+      // `path` est posé par Electron sur les fichiers déposés ; c'est la seule
+      // façon d'obtenir un chemin réel depuis un renderer en sandbox.
+      if (file?.path) openPath(file.path);
+    };
+    window.addEventListener('dragover', onOver);
+    window.addEventListener('dragleave', onLeave);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onOver);
+      window.removeEventListener('dragleave', onLeave);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, [openPath]);
 
   // Progression des opérations longues, relayée depuis le moteur.
   useEffect(() => window.titi.onEngineEvent((msg) => {
@@ -54,7 +82,7 @@ export default function App() {
         <PanelGroup direction="horizontal" autoSaveId="titi-layout">
           <Panel defaultSize={76} minSize={40}>
             <div className="viewport">
-              {geometry ? <Viewport geometry={geometry} layerY={layerY} onStats={setStats} /> : <Empty onOpen={open} />}
+              {geometry ? <Viewport geometry={geometry} layerY={layerY} onStats={setStats} /> : <Empty onOpen={open} onOpenWorld={openWorld} />}
 
               {project && (
                 <>
@@ -91,6 +119,16 @@ export default function App() {
               )}
 
               <ToolWheel />
+
+              {dropping && (
+                <div className="drop-veil">
+                  <div className="drop-card">
+                    <FolderOpen size={26} strokeWidth={1.3} />
+                    <b>Déposer pour ouvrir</b>
+                    <span>.mca · dossier region/ zippé · .schem · .litematic</span>
+                  </div>
+                </div>
+              )}
             </div>
           </Panel>
 
@@ -113,7 +151,7 @@ export default function App() {
   );
 }
 
-function Empty({ onOpen }) {
+function Empty({ onOpen, onOpenWorld }) {
   return (
     <div className="empty">
       <Layers3 size={34} strokeWidth={1.2} style={{ color: 'var(--line)' }} />
@@ -123,9 +161,17 @@ function Empty({ onOpen }) {
         un <code>.schem</code> ou un <code>.litematic</code>. Le fichier d’origine n’est jamais modifié :
         tout le travail se fait sur une copie.
       </p>
-      <button className="btn" data-variant="primary" onClick={onOpen}>
-        <FolderOpen size={13} /> Ouvrir un build
-      </button>
+      <div className="row" style={{ flex: 'none' }}>
+        <button className="btn" data-variant="primary" onClick={onOpen}>
+          <FolderOpen size={13} /> Ouvrir un fichier
+        </button>
+        <button className="btn" onClick={onOpenWorld}>
+          <FolderTree size={13} /> Ouvrir une save
+        </button>
+      </div>
+      <p style={{ margin: 0, fontSize: 'var(--t-micro)', color: 'var(--line)' }}>
+        …ou glisse un fichier dans la fenêtre.
+      </p>
     </div>
   );
 }

@@ -102,22 +102,88 @@ app.whenReady().then(async () => {
   // méthodes, et le renderer ne peut rien invoquer d'autre.
   ipcMain.handle('engine:call', (_e, method, params) => engine.call(method, params));
 
+  /**
+   * Un chemin, quelle que soit sa provenance — dialogue ou glisser-déposer —
+   * arrive ici, et c'est l'extension qui décide de la porte d'entrée. Sans ce
+   * point unique, chaque façon d'ouvrir un fichier aurait sa propre logique et
+   * elles finiraient par diverger.
+   */
+  const openAnyPath = async (target) => {
+    if (!target) return null;
+    const ext = path.extname(target).toLowerCase();
+    if (ext === '.schem' || ext === '.litematic' || ext === '.schematic') {
+      return engine.call('openSchematic', { filePath: target });
+    }
+    if (ext === '.mca' || ext === '.zip') {
+      return engine.call('openFile', { filePath: target });
+    }
+    // Ni l'un ni l'autre : c'est probablement un dossier (save ou region/).
+    return engine.call('openWorld', { dirPath: target });
+  };
+
   ipcMain.handle('shell:openBuild', async () => {
     const res = await dialog.showOpenDialog(win, {
       title: 'Ouvrir un build',
       properties: ['openFile'],
       filters: [
-        { name: 'Build Minecraft', extensions: ['mca', 'zip', 'schem', 'litematic'] },
+        { name: 'Tout ce qui s’ouvre', extensions: ['mca', 'zip', 'schem', 'litematic', 'schematic'] },
         { name: 'Région Anvil', extensions: ['mca'] },
         { name: 'Dossier region/ zippé', extensions: ['zip'] },
+        { name: 'Schematic', extensions: ['schem', 'litematic', 'schematic'] },
       ],
     });
     if (res.canceled || !res.filePaths[0]) return null;
-    return engine.call('openFile', { filePath: res.filePaths[0] });
+    return openAnyPath(res.filePaths[0]);
   });
 
-  ipcMain.handle('shell:saveExport', async (_e, { id, offset, defaultName }) => {
-    const out = await engine.call('exportBuild', { id, offset });
+  ipcMain.handle('shell:openWorldFolder', async () => {
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Ouvrir un dossier de save ou un dossier region/',
+      properties: ['openDirectory'],
+    });
+    if (res.canceled || !res.filePaths[0]) return null;
+    return engine.call('openWorld', { dirPath: res.filePaths[0] });
+  });
+
+  ipcMain.handle('shell:openPath', (_e, target) => openAnyPath(target));
+
+  /**
+   * Écrire dans la save de quelqu'un est la seule action irréversible de
+   * l'application. Elle passe donc par une confirmation MODALE qui dit
+   * exactement ce qui va se passer — combien de régions, où, et qu'une
+   * sauvegarde sera prise avant.
+   */
+  ipcMain.handle('shell:applyToWorld', async (_e, { id }) => {
+    const info = await engine.call('inspectWorld', { id });
+    if (!info.attached) throw new Error('no_world');
+    if (info.lock.locked) throw new Error('world_busy');
+
+    const incertain = !info.lock.reliable && !!info.lock.reason && info.lock.reason !== 'no_lock_file';
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: ['Annuler', 'Appliquer au monde'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'Appliquer au monde',
+      message: `Réécrire ${info.regions} région${info.regions > 1 ? 's' : ''} dans « ${info.name} » ?`,
+      detail: [
+        `Dossier : ${info.path}`,
+        'Une sauvegarde zip horodatée des régions concernées est prise avant toute écriture.',
+        incertain
+          ? `\nCette plateforme ne permet pas de vérifier si Minecraft tient le monde ouvert. Ferme le jeu avant de continuer — écrire dans un monde chargé le corrompt.`
+          : '',
+      ].filter(Boolean).join('\n'),
+    });
+    if (response !== 1) return null;
+
+    return engine.call('applyToWorld', { id, force: true });
+  });
+
+  ipcMain.handle('shell:saveExport', async (_e, { id, offset, format = 'mca', selection, defaultName }) => {
+    const out = format === 'mca'
+      ? await engine.call('exportBuild', { id, offset })
+      : await engine.call('exportSchematic', { id, selection, format });
+
     const res = await dialog.showSaveDialog(win, {
       title: 'Exporter le build',
       defaultPath: defaultName || out.filename,
@@ -125,7 +191,13 @@ app.whenReady().then(async () => {
     if (res.canceled || !res.filePath) return null;
     // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin issu du dialogue « Enregistrer » du système
     fs.writeFileSync(res.filePath, Buffer.from(out.buffer));
-    return { path: res.filePath, bytes: out.buffer.byteLength ?? out.buffer.length };
+    return {
+      path: res.filePath,
+      bytes: out.buffer.byteLength ?? out.buffer.length,
+      // WorldEdit ne colle les entités qu'avec `//paste -e` : le dire ici évite
+      // de découvrir leur absence une fois le schematic collé en jeu.
+      note: out.note || null,
+    };
   });
 
   ipcMain.handle('shell:window', (_e, action) => {

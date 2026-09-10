@@ -1,4 +1,4 @@
-import { Minus, Square, X, Search, Pickaxe } from 'lucide-react';
+import { Minus, Square, X, Search, Pickaxe } from './icons.js';
 import { useApp } from '../store.js';
 
 // Barre de titre maison : onglets de projets et recherche. La zone vide est

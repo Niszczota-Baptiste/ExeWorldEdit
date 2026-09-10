@@ -20,6 +20,9 @@
 //     min:    { x, y, z },          coin bas de l'emprise du CONTENU
 //     size:   { x, y, z },          dimensions inclusives de cette emprise
 //     source: { file, name }|null,  le .mca / .zip d'origine, tel qu'importé
+//     world:  { path, kind }|null,  la save d'où vient le projet, s'il vient
+//                                   d'un dossier de monde — la cible de
+//                                   « Appliquer au monde »
 //   }
 //
 //   `min`/`size` suivent le contenu réel, pas les limites d'édition : on peut

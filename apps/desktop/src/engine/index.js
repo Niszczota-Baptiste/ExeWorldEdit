@@ -1,8 +1,13 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { FsAdapter, defaultRoot } from '@titi/we-engine/storage';
-import { createStaging, createLibrary, buildExtent, buildLimits } from '@titi/we-engine/staging';
+import {
+  createStaging, createLibrary, buildExtent, buildLimits,
+  schematicToRegions, volumeToSchematic,
+} from '@titi/we-engine/staging';
 import { regionCoordsFromName } from '@titi/we-engine/anvil';
+import { readSaveInfo, probeWorldLock, applyToWorld } from '@titi/we-engine/world';
+import { schematicToSponge, schematicToLitematic } from '@titi/we-engine/worldedit';
 
 // LE MOTEUR — tourne dans un `utilityProcess`, jamais dans le renderer.
 //
@@ -90,6 +95,119 @@ const methods = {
     return projectState(project(id));
   },
 
+  /**
+   * Ouvre un `.schem` ou un `.litematic`. Un schematic n'a ni chunks ni
+   * coordonnées : on lui fabrique des régions vierges et on l'y tamponne, pour
+   * qu'il devienne un build ordinaire au lieu d'un cas particulier que tout le
+   * moteur devrait connaître.
+   */
+  async openSchematic({ filePath, name }) {
+    const base = path.basename(filePath);
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin issu du dialogue « Ouvrir »
+    const buffer = fs.readFileSync(filePath);
+    const out = await schematicToRegions(buffer, base);
+
+    const id = `p${Date.now().toString(36)}`;
+    adapter.saveProject({
+      id, name: name || base.replace(/\.(schem|litematic|schematic)$/i, ''),
+      min: out.origin, size: out.size,
+    });
+    staging.seedRegions(id, out.regions);
+    await staging.regenPreview(project(id));
+    return projectState(project(id));
+  },
+
+  /**
+   * Ouvre un dossier de save ou un dossier `region/`. Toutes ses régions
+   * deviennent le staging du projet, et le dossier d'origine est mémorisé pour
+   * « Appliquer au monde ».
+   */
+  async openWorld({ dirPath }) {
+    const info = readSaveInfo(dirPath);
+    if (info.kind === 'unknown') throw new Error('not_a_world');
+    if (!info.regionDir) throw new Error('no_region_dir');
+
+    const files = listRegionFilesIn(info.regionDir);
+    if (!files.length) throw new Error('no_region');
+
+    const id = `p${Date.now().toString(36)}`;
+    adapter.saveProject({
+      id, name: info.name,
+      min: { x: 0, y: -64, z: 0 }, size: { x: 1, y: 1, z: 1 },
+      world: { path: info.root, kind: info.kind },
+    });
+    staging.seedRegions(id, files.map((f) => ({
+      regionX: f.regionX, regionZ: f.regionZ,
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- dossier choisi par l'utilisateur, nom validé
+      buffer: fs.readFileSync(path.join(info.regionDir, f.file)),
+    })));
+    await methods.rescanExtent({ id });
+    return { ...projectState(project(id)), lock: probeWorldLock(info) };
+  },
+
+  /** Ce que l'écran « Appliquer au monde » doit savoir avant de proposer quoi que ce soit. */
+  inspectWorld({ id }) {
+    const p = project(id);
+    if (!p.world?.path) return { attached: false };
+    const info = readSaveInfo(p.world.path);
+    return {
+      attached: true,
+      path: info.root,
+      name: info.name,
+      hasEntities: !!info.entitiesDir,
+      lock: probeWorldLock(info),
+      regions: staging.listRegionFiles(id).length,
+    };
+  },
+
+  /**
+   * Réécrit les régions du staging dans la save d'origine. Le moteur refuse si
+   * Minecraft tient le monde, et sauvegarde en zip horodaté AVANT d'écrire —
+   * dans cet ordre, sans quoi la sauvegarde n'aurait plus rien à sauvegarder.
+   */
+  applyToWorld({ id, force = false }) {
+    const p = project(id);
+    if (!p.world?.path) throw new Error('no_world');
+    const info = readSaveInfo(p.world.path);
+    const dir = staging.stagingRegionsDir(id);
+    const regions = staging.listRegionFiles(id).map((f) => ({
+      regionX: f.regionX, regionZ: f.regionZ,
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- dossier du moteur, nom validé
+      buffer: fs.readFileSync(path.join(dir, f.file)),
+    }));
+    const res = applyToWorld({
+      info, regions, force,
+      backupDir: path.join(root, 'sauvegardes'),
+    });
+    adapter.appendAudit({
+      projectId: id, actor: 'local', operation: 'apply-to-world',
+      params: { world: info.root, regions: res.written, backup: res.backup?.file || null },
+      blocksChanged: 0,
+    });
+    return res;
+  },
+
+  /** Sort la sélection en `.schem` ou `.litematic`, prête à écrire. */
+  async exportSchematic({ id, selection, format = 'schem', name }) {
+    const p = project(id);
+    const store = staging.loadStore(p);
+    await store.warmup(buildExtent(p));
+    const sel = selection || buildExtent(p);
+    const schem = volumeToSchematic(store, sel);
+    const label = name || p.name;
+    const buffer = format === 'litematic'
+      ? await schematicToLitematic(schem, { name: label })
+      : await schematicToSponge(schem, { name: label });
+    return {
+      buffer,
+      filename: `${label.replace(/[^\w.-]+/g, '_').slice(0, 60) || 'build'}.${format}`,
+      mime: 'application/octet-stream',
+      // WorldEdit ne colle les entités qu'avec `//paste -e` : l'écran d'export
+      // doit le rappeler, sinon elles manqueront sans que rien ne le dise.
+      note: 'entities',
+    };
+  },
+
   closeProject: ({ id }) => { adapter.removeProject(id); return true; },
 
   // ── Géométrie pour le viewport ────────────────────────────────────────────
@@ -171,6 +289,14 @@ const methods = {
     node: process.versions.node,
   }),
 };
+
+/** Régions d'un dossier arbitraire (pas forcément le staging). */
+function listRegionFilesIn(dir) {
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- dossier choisi par l'utilisateur
+  return fs.readdirSync(dir)
+    .map((f) => { const m = /^r\.(-?\d+)\.(-?\d+)\.mca$/.exec(f); return m ? { file: f, regionX: Number(m[1]), regionZ: Number(m[2]) } : null; })
+    .filter(Boolean);
+}
 
 function send(message) {
   process.parentPort?.postMessage(message);

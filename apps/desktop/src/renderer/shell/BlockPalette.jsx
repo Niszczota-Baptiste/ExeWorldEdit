@@ -1,6 +1,6 @@
 import { useMemo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Layers, Search } from 'lucide-react';
+import { Layers, Search } from './icons.js';
 import { useApp } from '../store.js';
 import { blockColor } from '../viewport/blockColors.js';
 

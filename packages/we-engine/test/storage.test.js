@@ -198,3 +198,21 @@ test('StorageAdapter nu : chaque méthode dit laquelle manque', () => {
   assert.throws(() => bare.appendAudit({}), /StorageAdapter\.appendAudit/);
   assert.throws(() => bare.listSchematics('s'), /StorageAdapter\.listSchematics/);
 });
+
+test('FsAdapter — la save d’origine reste attachée au projet', () => {
+  const a = tmpAdapter();
+  a.saveProject({ id: 'p1', name: 'Monde', world: { path: '/chemin/vers/Ma Partie', kind: 'save' } });
+  // Sans ça, « Appliquer au monde » ne saurait plus où appliquer après un
+  // redémarrage de l'application.
+  assert.deepEqual(a.getProject('p1').world, { path: '/chemin/vers/Ma Partie', kind: 'save' });
+
+  // Une mise à jour d'emprise ne doit pas la faire disparaître au passage.
+  a.saveExtent('p1', { min: { x: 0, y: 0, z: 0 }, max: { x: 9, y: 9, z: 9 } });
+  assert.equal(a.getProject('p1').world.path, '/chemin/vers/Ma Partie');
+});
+
+test('FsAdapter — un projet sans monde attaché le dit par null', () => {
+  const a = tmpAdapter();
+  a.saveProject({ id: 'p1', name: 'Schematic' });
+  assert.equal(a.getProject('p1').world, null);
+});

@@ -31,7 +31,10 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
    et leurs états se transforment ; leur namespace, jamais.
 4. **Toute génération aléatoire prend une seed** et est rejouable. Les fonctions
    qui tirent au sort acceptent un générateur injectable (voir `weightedPicker`).
-5. **Aucune écriture dans une save sans sauvegarde préalable.**
+5. **Aucune écriture dans une save sans sauvegarde préalable**, et dans cet
+   ordre : refuser si Minecraft tient le monde, sauvegarder en zip horodaté,
+   puis écrire. Une sauvegarde prise après la première écriture ne sauvegarde
+   plus rien — un test l'exige explicitement.
 6. **Le renderer ne touche jamais au disque.** Il passe par la liste blanche du
    preload (`apps/desktop/src/preload/index.cjs`) et rien d'autre. Ajouter une
    capacité veut dire l'ajouter à cette liste — délibérément, pas par accident.
@@ -62,7 +65,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (143 tests aujourd'hui)
+npm test          # tous les paquets (167 tests aujourd'hui)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -88,6 +91,8 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Une capacité pour le renderer | la méthode dans `apps/desktop/src/engine/index.js`, puis son nom dans `ENGINE_METHODS` du preload |
 | Un outil dans l'interface | `TOOLS` et `TOOL_OPS` (`apps/desktop/src/renderer/store.js`) — l'inspecteur génère ses champs depuis le descripteur du moteur, il n'y a pas de formulaire à écrire |
 | Une couleur de bloc pour le viewport | `EXTRA` dans `apps/desktop/src/renderer/viewport/blockColors.js` (en attendant l'atlas) |
+| Une icône | `apps/desktop/src/renderer/shell/icons.js` — le SEUL fichier du renderer qui importe `lucide-react` |
+| Un format d'entrée | `openAnyPath` (`apps/desktop/src/main/index.js`) décide selon l'extension ; dialogues et glisser-déposer y passent tous les deux |
 
 ## Ce qui n'est pas encore là
 
@@ -126,3 +131,7 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
 - **Un panneau redimensionnable n'est pas un conteneur flex.** `flex: 1` sur le
   viewport ne lui donnait aucune hauteur, et le canvas se rendait en 1175×0 —
   sans la moindre erreur. `height: 100%`.
+- **Le verrou `session.lock` n'est détectable que sur Windows.** Ailleurs il est
+  consultatif et une ouverture réussie ne prouve rien. `probeWorldLock` renvoie
+  `{ locked, reliable }` : ne jamais réduire ça à un booléen, ce serait
+  affirmer qu'un monde est libre sans le savoir.

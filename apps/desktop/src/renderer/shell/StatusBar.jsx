@@ -1,4 +1,4 @@
-import { Gauge, Boxes, Crosshair, MemoryStick, History, ArrowRight } from 'lucide-react';
+import { Gauge, Boxes, Crosshair, MemoryStick, History, ArrowRight } from './icons.js';
 import { useApp } from '../store.js';
 
 // Barre d'état : coordonnées, sélection, blocs, mémoire, images par seconde,

@@ -83,13 +83,29 @@ export const useApp = create((set, get) => ({
     });
   },
 
-  async open() {
-    const project = await api().openBuild();
-    if (!project) return null;
-    await get().refreshProjects();
-    await get().activate(project.id);
-    get().say(`« ${project.name} » ouvert.`);
-    return project;
+  async open() { return get()._opened(() => api().openBuild()); },
+  async openWorld() { return get()._opened(() => api().openWorldFolder()); },
+  async openPath(filePath) { return get()._opened(() => api().openPath(filePath)); },
+
+  async _opened(fn) {
+    try {
+      const project = await fn();
+      if (!project) return null;
+      await get().refreshProjects();
+      await get().activate(project.id);
+      // Un monde ouvert dans Minecraft s'ouvre quand même en lecture — c'est
+      // au moment d'écrire qu'on refuse. Le dire tout de suite évite de
+      // travailler une heure avant de l'apprendre.
+      if (project.lock?.locked) {
+        get().say(`« ${project.name} » est ouvert dans Minecraft : lecture seule tant que le jeu tourne.`);
+      } else {
+        get().say(`« ${project.name} » ouvert.`);
+      }
+      return project;
+    } catch (e) {
+      get().say(errorText(e, 'ouverture'));
+      return null;
+    }
   },
 
   async run(operation, params) {
@@ -128,11 +144,38 @@ export const useApp = create((set, get) => ({
     }
   },
 
-  async exportBuild() {
+  /** @param {'mca'|'schem'|'litematic'} format */
+  async exportBuild(format = 'mca') {
     const project = get().project();
     if (!project) return;
-    const res = await api().saveExport({ id: project.id, defaultName: null });
-    if (res) get().say(`Exporté : ${res.path}`);
+    try {
+      const res = await api().saveExport({
+        id: project.id, format,
+        selection: format === 'mca' ? undefined : get().selection,
+      });
+      if (!res) return;
+      get().say(res.note === 'entities'
+        ? `Exporté : ${res.path} — WorldEdit ne colle les entités qu’avec //paste -e.`
+        : `Exporté : ${res.path}`);
+    } catch (e) {
+      get().say(errorText(e, 'export'));
+    }
+  },
+
+  /** Réécrit le staging dans la save d'origine. Irréversible côté monde. */
+  async applyToWorld() {
+    const project = get().project();
+    if (!project?.world) return;
+    try {
+      const res = await api().applyToWorld({ id: project.id });
+      if (!res) return; // annulé dans la confirmation
+      await get().refreshProjects();
+      get().say(res.backup
+        ? `${res.written} région${res.written > 1 ? 's' : ''} appliquée${res.written > 1 ? 's' : ''}. Sauvegarde : ${res.backup.file}`
+        : `${res.written} région${res.written > 1 ? 's' : ''} appliquée${res.written > 1 ? 's' : ''}.`);
+    } catch (e) {
+      get().say(errorText(e, 'application au monde'));
+    }
   },
 }));
 
@@ -153,6 +196,13 @@ function errorText(e, context) {
     too_many_blocks: 'Zone trop dense pour être affichée d’un coup. Réduis la sélection.',
     empty_box: 'La zone ne contient aucun bloc.',
     unknown_operation: `Opération inconnue : ${context}.`,
+    world_busy: 'Ce monde est ouvert dans Minecraft. Ferme le jeu, puis réessaie.',
+    lock_unverifiable: 'Impossible de vérifier si Minecraft tient ce monde. Ferme le jeu avant d’appliquer.',
+    no_world: 'Ce projet ne vient pas d’un dossier de monde : rien où l’appliquer.',
+    not_a_world: 'Ce dossier n’est ni une save ni un dossier region/.',
+    no_region_dir: 'Ce monde n’a pas de dossier region/.',
+    no_region: 'Ce dossier ne contient aucun fichier de région.',
+    bad_schematic: 'Ce fichier n’est pas un schematic lisible.',
   };
   return table[code] || `Échec de ${context} : ${code}`;
 }

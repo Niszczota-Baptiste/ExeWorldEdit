@@ -11,6 +11,7 @@
     "./worldedit": "./src/worldedit/index.js",
     "./storage": "./src/storage/index.js",
     "./staging": "./src/staging/index.js",
+    "./world": "./src/world/index.js",
     "./colors": "./src/worldedit/blockPalette.js",
     "./operations": "./src/worldedit/operations.js",
     "./blockstates": "./src/worldedit/blockstates.js",

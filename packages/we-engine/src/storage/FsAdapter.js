@@ -109,6 +109,10 @@ export class FsAdapter extends StorageAdapter {
       min: { x: 0, y: 0, z: 0, ...(project?.min || {}) },
       size: { x: 1, y: 1, z: 1, ...(project?.size || {}) },
       source: project?.source ? { file: project.source.file, name: project.source.name } : null,
+      // La save d'origine, quand le projet vient d'un dossier de monde : c'est
+      // elle que vise « Appliquer au monde ». Absente pour un projet ouvert
+      // depuis un .mca isolé ou un schematic.
+      world: project?.world ? { path: project.world.path, kind: project.world.kind } : null,
       createdAt: this.getProject(id)?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
