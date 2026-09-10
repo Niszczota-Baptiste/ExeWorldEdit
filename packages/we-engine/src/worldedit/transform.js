@@ -293,7 +293,7 @@ export function opSet(vol, sel, { block, mask }) {
 // Mélange aléatoire pondéré : chaque case prend un bloc tiré au sort selon les
 // poids (% relatifs). `from` optionnel = ne change que les blocs correspondants
 // (sinon toute la sélection). Ex. 20% cobble / 30% terre / 20% andésite…
-export function opMix(vol, sel, { from, pattern, mask }) {
+export function opMix(vol, sel, { from, pattern, mask, seed }) {
   if (!Array.isArray(pattern) || pattern.length === 0) throw new Error('bad_pattern');
   const entries = pattern
     .filter((p) => p?.name && Number(p.weight) > 0)
@@ -302,8 +302,9 @@ export function opMix(vol, sel, { from, pattern, mask }) {
   const total = entries.reduce((s, e) => s + e.w, 0);
   let acc = 0;
   const cum = entries.map((e) => { acc += e.w; return { block: e.block, c: acc }; });
-  const pick = () => {
-    const r = Math.random() * total;
+  const sd = Number.isFinite(seed) ? (seed | 0) : 1337;
+  const pick = (x, y, z) => {
+    const r = hash3(x, y, z, sd) * total;
     for (const e of cum) if (r < e.c) return e.block;
     return cum[cum.length - 1].block;
   };
@@ -322,7 +323,7 @@ export function opMix(vol, sel, { from, pattern, mask }) {
   }
   let changed = 0;
   for (const [x, y, z] of cells) {
-    const b = pick();
+    const b = pick(x, y, z);
     if (!sameBlock(vol.getBlock(x, y, z), b)) { vol.setBlock(x, y, z, clone(b)); changed++; }
   }
   return { blocksChanged: changed, bounds: sel };
@@ -433,28 +434,37 @@ function biomeToPreset(biome) {
   return 'plains';
 }
 
-// Tireur pondéré pour la roche profonde (mélange par bloc).
-function fillerPicker(filler) {
+// Tireur pondéré pour la roche profonde (mélange par bloc), indexé sur la
+// POSITION : à seed égale, la même colonne rend toujours la même roche.
+function fillerPicker(filler, seed) {
   const list = filler.map(([name, w]) => [toBlock({ name: nm(name) }), Math.max(1, w)]);
   const total = list.reduce((s, [, w]) => s + w, 0);
-  return () => { let r = Math.random() * total; for (const [b, w] of list) { r -= w; if (r <= 0) return b; } return list[list.length - 1][0]; };
+  // Décalage de graine : sans lui, la roche profonde partagerait sa graine avec
+  // le bruit de relief, et son motif pourrait épouser celui des collines.
+  const sd = (Number.isFinite(seed) ? (seed | 0) : 1337) + 9176;
+  return (x, y, z) => {
+    let r = hash3(x, y, z, sd) * total;
+    for (const [b, w] of list) { r -= w; if (r <= 0) return b; }
+    return list[list.length - 1][0];
+  };
 }
-function paletteOf(p) {
-  return { surface: toBlock({ name: nm(p.surface) }), soil: toBlock({ name: nm(p.soil) }), pick: fillerPicker(p.filler) };
+function paletteOf(p, seed) {
+  return { surface: toBlock({ name: nm(p.surface) }), soil: toBlock({ name: nm(p.soil) }), pick: fillerPicker(p.filler, seed) };
 }
 
 export function opNaturalize(vol, sel, params = {}) {
   const presetKey = params.preset || 'plains';
   const auto = presetKey === 'auto';
+  const seed = Number.isFinite(params.seed) ? (params.seed | 0) : 1337;
   let pal;
   if (presetKey === 'custom') {
     pal = paletteOf({
       surface: params.surface || 'minecraft:grass_block',
       soil: params.soil || 'minecraft:dirt',
       filler: [[params.filler || 'minecraft:stone', 1]],
-    });
+    }, seed);
   } else if (!auto) {
-    pal = paletteOf(NATURALIZE_PRESETS[presetKey] || NATURALIZE_PRESETS.plains);
+    pal = paletteOf(NATURALIZE_PRESETS[presetKey] || NATURALIZE_PRESETS.plains, seed);
   }
   let c = 0;
   for (let z = sel.min.z; z <= sel.max.z; z++)
@@ -465,9 +475,9 @@ export function opNaturalize(vol, sel, params = {}) {
         if (isAir(vol.getBlock(x, y, z))) { depth = 0; continue; }
         if (depth === 0 && auto) {
           const biome = vol.getBiome ? vol.getBiome(x, y, z) : null;
-          col = paletteOf(NATURALIZE_PRESETS[biomeToPreset(biome)]);
+          col = paletteOf(NATURALIZE_PRESETS[biomeToPreset(biome)], seed);
         }
-        const target = depth === 0 ? col.surface : depth <= 3 ? col.soil : col.pick();
+        const target = depth === 0 ? col.surface : depth <= 3 ? col.soil : col.pick(x, y, z);
         if (!sameBlock(vol.getBlock(x, y, z), target)) { vol.setBlock(x, y, z, clone(target)); c++; }
         depth++;
       }
@@ -489,6 +499,27 @@ export const TERRAIN_STYLES = {
   crevasse: { octaves: 4, scale: 38, amp: 0.72, exp: 1.7, ridged: true, carve: true, base: 0.7, palette: 'mountain' },
 };
 export const TERRAIN_STYLE_IDS = Object.keys(TERRAIN_STYLES);
+
+/**
+ * Hash entier déterministe (x, y, z, seed) → [0,1).
+ *
+ * Les tirages par bloc (mélange pondéré, roche profonde) passent par ICI et non
+ * par `Math.random` : l'invariant n° 4 veut que toute génération aléatoire soit
+ * rejouable à seed égale. Un hash de POSITION est meilleur qu'un générateur à
+ * état pour ça — il ne dépend pas de l'ordre de parcours, donc rejouer la même
+ * opération sur la même zone redonne exactement le même résultat, même si la
+ * boucle change un jour.
+ */
+function hash3(x, y, z, seed) {
+  let h = Math.imul(x | 0, 374761393)
+    ^ Math.imul(y | 0, 1103515245)
+    ^ Math.imul(z | 0, 668265263)
+    ^ Math.imul(seed | 0, 362437);
+  h = Math.imul(h ^ (h >>> 15), 2246822519);
+  h = Math.imul(h ^ (h >>> 13), 3266489917);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
 
 // Hash entier déterministe (x, z, seed) → [0,1).
 function hash2(x, z, seed) {
@@ -525,9 +556,9 @@ export async function opTerrain(vol, sel, params = {}, ctx) {
   const clearAbove = params.clearAbove !== false;
   const palKey = (params.palette && params.palette !== 'match') ? params.palette : style.palette;
   const auto = palKey === 'auto';
-  const fixedPal = (!auto && palKey !== 'custom') ? paletteOf(NATURALIZE_PRESETS[palKey] || NATURALIZE_PRESETS.plains) : null;
+  const fixedPal = (!auto && palKey !== 'custom') ? paletteOf(NATURALIZE_PRESETS[palKey] || NATURALIZE_PRESETS.plains, seed) : null;
   const customPal = palKey === 'custom'
-    ? paletteOf({ surface: params.surface || 'minecraft:grass_block', soil: params.soil || 'minecraft:dirt', filler: [[params.filler || 'minecraft:stone', 1]] })
+    ? paletteOf({ surface: params.surface || 'minecraft:grass_block', soil: params.soil || 'minecraft:dirt', filler: [[params.filler || 'minecraft:stone', 1]] }, seed)
     : null;
 
   const minY = sel.min.y, maxY = sel.max.y;
@@ -542,10 +573,10 @@ export async function opTerrain(vol, sel, params = {}, ctx) {
       let hf = style.carve ? style.base - style.amp * ampMul * n : style.base + style.amp * ampMul * n;
       hf = Math.max(0, Math.min(1, hf));
       const topY = minY + Math.round(hf * range);
-      const pal = auto ? paletteOf(NATURALIZE_PRESETS[biomeToPreset(vol.getBiome ? vol.getBiome(x, topY, z) : null)]) : (customPal || fixedPal);
+      const pal = auto ? paletteOf(NATURALIZE_PRESETS[biomeToPreset(vol.getBiome ? vol.getBiome(x, topY, z) : null)], seed) : (customPal || fixedPal);
       for (let y = minY; y <= topY; y++) {
         const depth = topY - y;
-        const target = depth === 0 ? pal.surface : depth <= 3 ? pal.soil : pal.pick();
+        const target = depth === 0 ? pal.surface : depth <= 3 ? pal.soil : pal.pick(x, y, z);
         if (!sameBlock(vol.getBlock(x, y, z), target)) { vol.setBlock(x, y, z, clone(target)); c++; }
       }
       if (clearAbove) {

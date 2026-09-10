@@ -428,6 +428,57 @@ renderer. Phase 1.2 également.
 
 ---
 
+## Rejouabilité des tirages aléatoires
+
+L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
+égale. Deux endroits ne le respectaient pas : `opMix` et `fillerPicker`
+(la roche profonde de `naturalize` et `terrain`) appelaient `Math.random()`.
+Deux exécutions de `make-demo.js` avec la même seed ne rendaient donc pas le
+même build — « Massif rocheux » sortait à 105 369 puis 105 385 blocs.
+
+Le défaut est venu du relevé de performance : en comparant deux exécutions pour
+mesurer un gain, les compteurs de blocs ne tombaient pas juste.
+
+### Un hash de position, pas un générateur à état
+
+Les deux tirages passent maintenant par `hash3(x, y, z, seed)`, du même
+tonneau que le `hash2` qui sert déjà au bruit de relief. C'est un meilleur
+choix qu'un générateur à état pour ce travail :
+
+- **il ne dépend pas de l'ordre de parcours.** Un générateur à état ne rejoue
+  identique que si la boucle visite les cases dans le même ordre — une
+  contrainte invisible qu'une optimisation future casserait sans bruit ;
+- **il est stable par morceaux.** Mélanger un cube entier, puis remélanger un
+  coin de ce cube avec la même seed, redonne exactement les mêmes blocs dans ce
+  coin. Un test l'exige.
+
+La roche profonde décale sa graine (`seed + 9176`) : sans ça, elle partagerait
+sa graine avec le bruit de relief et son motif pourrait épouser celui des
+collines.
+
+`mix` et `naturalize` gagnent un paramètre `seed`, comme `terrain` en avait
+déjà un.
+
+### Le piège : un normaliseur qui jette en silence
+
+`normalizeParams` (`worldedit/operations.js`) ne garde que les paramètres qu'il
+nomme explicitement — et pour `naturalize`, le cas non personnalisé faisait
+`return { preset }`. Ajouter `seed` au descripteur et à l'opération n'aurait
+donc **rien changé** : la graine aurait été jetée entre les deux, sans erreur,
+et le tirage serait resté non rejouable pendant qu'un champ « Graine » invitait
+à le régler.
+
+### Vérification
+
+Deux exécutions de `make-demo.js` rendent désormais des compteurs identiques au
+bloc près, palette dominante comprise. Côté tests, la rejouabilité se vérifie
+sur la sélection ENTIÈRE et non sur un bloc — comparer un seul bloc passerait
+par chance une fois sur N. Un test de distribution vérifie en plus que les
+proportions tirées suivent les poids demandés à moins de 2 points : un hash mal
+mélangé passerait les tests de rejouabilité et produirait quand même des bandes.
+
+---
+
 ## Écarts assumés avec le moteur du site
 
 | Sujet | Site | Ici | Pourquoi |
@@ -455,12 +506,8 @@ renderer. Phase 1.2 également.
   changé : `JSON.stringify` + gzip forment un plancher d'environ 120 ms. Le
   parcours, lui, est devenu incrémental. Descendre plus bas demande un format
   binaire ou découpé par chunk, donc de toucher aussi le renderer. Phase 1.2.
-- **Deux tirages aléatoires ignorent la seed** : `opMix` et `fillerPicker`
-  (`worldedit/transform.js`) appellent `Math.random()` au lieu du générateur
-  injectable, contrairement à `weightedPicker`. Deux exécutions de
-  `make-demo.js` avec la même seed ne rendent donc pas le même build
-  (« Massif rocheux » : 105 369 puis 105 385 blocs). Ça casse l'invariant n° 4
-  et ça n'a rien à voir avec l'aperçu — antérieur à ce travail, à corriger.
+- **Pas de textures ni de modèles non cubiques** dans le viewport (phase 2.5),
+  détaillé plus bas.
 
 ### Ce que le viewport ne fait pas encore
 

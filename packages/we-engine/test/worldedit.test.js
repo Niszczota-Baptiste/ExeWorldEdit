@@ -557,3 +557,136 @@ test('opScale plein (sans hollow) : remplit tout le cube agrandi', () => {
   let n = 0; for (let y = 0; y < 4; y++) for (let z = 0; z < 4; z++) for (let x = 0; x < 4; x++) if (vol.getBlock(x, y, z)) n++;
   assert.equal(n, 64);
 });
+
+// ── Rejouabilité (invariant n° 4) ───────────────────────────────────────────
+//
+// `opMix` et la roche profonde de `naturalize`/`terrain` tiraient au sort avec
+// `Math.random` : deux exécutions à seed égale ne donnaient pas le même build.
+// Le tirage passe maintenant par un hash de POSITION, donc il ne dépend même
+// pas de l'ordre de parcours.
+//
+// Un test de rejouabilité qui ne comparerait qu'un bloc passerait par chance
+// une fois sur N. On compare la sélection ENTIÈRE.
+
+const cube = (n) => ({ min: { x: 0, y: 0, z: 0 }, max: { x: n - 1, y: n - 1, z: n - 1 } });
+
+/** Remplit un cube de pierre et rend le volume. */
+function stoneCube(n) {
+  const vol = new MemoryVolume();
+  for (let y = 0; y < n; y++) for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) {
+    vol.setBlock(x, y, z, { Name: 'minecraft:stone', Properties: null });
+  }
+  return vol;
+}
+
+/** Empreinte d'une sélection : « quel bloc à quelle place », dans l'ordre. */
+function fingerprint(vol, sel) {
+  const out = [];
+  for (let y = sel.min.y; y <= sel.max.y; y++)
+    for (let z = sel.min.z; z <= sel.max.z; z++)
+      for (let x = sel.min.x; x <= sel.max.x; x++) out.push(vol.getBlock(x, y, z)?.Name || 'air');
+  return out.join('|');
+}
+
+const MELANGE = [
+  { name: 'minecraft:cobblestone', weight: 50 },
+  { name: 'minecraft:andesite', weight: 30 },
+  { name: 'minecraft:gravel', weight: 20 },
+];
+
+test('mix : deux exécutions à seed égale donnent exactement le même build', () => {
+  const sel = cube(12);
+  const a = stoneCube(12); opMix(a, sel, { pattern: MELANGE, seed: 42 });
+  const b = stoneCube(12); opMix(b, sel, { pattern: MELANGE, seed: 42 });
+  assert.equal(fingerprint(a, sel), fingerprint(b, sel));
+});
+
+test('mix : deux seeds différentes donnent des builds différents', () => {
+  const sel = cube(12);
+  const a = stoneCube(12); opMix(a, sel, { pattern: MELANGE, seed: 42 });
+  const b = stoneCube(12); opMix(b, sel, { pattern: MELANGE, seed: 43 });
+  assert.notEqual(fingerprint(a, sel), fingerprint(b, sel), 'la seed doit changer quelque chose');
+});
+
+test('mix : sans seed, le défaut reste rejouable', () => {
+  const sel = cube(8);
+  const a = stoneCube(8); opMix(a, sel, { pattern: MELANGE });
+  const b = stoneCube(8); opMix(b, sel, { pattern: MELANGE });
+  assert.equal(fingerprint(a, sel), fingerprint(b, sel));
+});
+
+test('mix : le tirage ne dépend pas de la taille de la sélection', () => {
+  // Le hash étant indexé sur la position, une passe sur un gros cube et une
+  // passe sur un coin de ce cube doivent s'accorder — ce qu'un générateur à
+  // état ne garantirait pas.
+  const grand = stoneCube(12);
+  opMix(grand, cube(12), { pattern: MELANGE, seed: 7 });
+  const petit = stoneCube(12);
+  opMix(petit, cube(4), { pattern: MELANGE, seed: 7 });
+  assert.equal(fingerprint(grand, cube(4)), fingerprint(petit, cube(4)));
+});
+
+test('mix : les proportions tirées suivent les poids demandés', () => {
+  // Un hash mal mélangé passerait les tests de rejouabilité et produirait
+  // quand même des bandes ou une palette déséquilibrée.
+  const n = 40;
+  const sel = cube(n);
+  const vol = stoneCube(n);
+  opMix(vol, sel, { pattern: MELANGE, seed: 2026 });
+
+  const counts = new Map();
+  for (let y = 0; y < n; y++) for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) {
+    const name = vol.getBlock(x, y, z).Name;
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  const total = n * n * n;
+  for (const { name, weight } of MELANGE) {
+    const part = ((counts.get(name) || 0) / total) * 100;
+    assert.ok(Math.abs(part - weight) < 2, `${name} : ${part.toFixed(1)} % attendu ~${weight} %`);
+  }
+});
+
+test('naturalize : la roche profonde est rejouable à seed égale', () => {
+  const sel = { min: { x: 0, y: 0, z: 0 }, max: { x: 15, y: 19, z: 15 } };
+  const col = (seed) => {
+    const vol = new MemoryVolume();
+    for (let z = 0; z <= 15; z++) for (let x = 0; x <= 15; x++)
+      for (let y = 0; y <= 19; y++) vol.setBlock(x, y, z, { Name: 'minecraft:cobblestone', Properties: null });
+    opNaturalize(vol, sel, { preset: 'mountain', seed });
+    return fingerprint(vol, sel);
+  };
+  assert.equal(col(5), col(5));
+  assert.notEqual(col(5), col(6));
+});
+
+test('terrain : deux exécutions à seed égale donnent le même relief ET la même roche', async () => {
+  const run = async () => {
+    const vol = new MemoryVolume();
+    const sel = { min: { x: 0, y: 0, z: 0 }, max: { x: 23, y: 23, z: 23 } };
+    await opTerrain(vol, sel, { style: 'collines', seed: 99, amplitude: 1, palette: 'mountain' });
+    return fingerprint(vol, sel);
+  };
+  assert.equal(await run(), await run());
+});
+
+// Le descripteur, le normaliseur et l'opération sont TROIS endroits distincts.
+// Ajouter `seed` aux deux premiers sans le troisième — ou l'inverse — donne un
+// champ « Graine » qui ne sert à rien, sans la moindre erreur. C'est arrivé.
+test('la graine survit au normaliseur de chaque opération qui en a une', async () => {
+  const { OPERATIONS, normalizeParams } = await import('../src/worldedit/operations.js');
+
+  const withSeed = OPERATIONS.filter((op) => op.params.some((p) => p.name === 'seed'));
+  assert.deepEqual(withSeed.map((o) => o.id).sort(), ['mix', 'naturalize', 'terrain']);
+
+  const echantillons = {
+    mix: { pattern: [{ name: 'minecraft:stone', weight: 1 }] },
+    naturalize: { preset: 'plains' },
+    terrain: { style: 'collines' },
+  };
+  for (const op of withSeed) {
+    const out = normalizeParams(op.id, { ...echantillons[op.id], seed: 4242 });
+    assert.equal(out.seed, 4242, `${op.id} : le normaliseur jette la graine`);
+  }
+  // `naturalize` avait deux sorties, dont une qui ne recopiait que `preset`.
+  assert.equal(normalizeParams('naturalize', { preset: 'custom', seed: 4242 }).seed, 4242);
+});

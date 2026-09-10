@@ -89,6 +89,7 @@ export const OPERATIONS = [
       { name: 'from', type: 'block', label: 'Bloc source (vide = tous)' },
       { name: 'pattern', type: 'pattern', label: 'Mélange (blocs + poids %)' },
       { name: 'mask', type: 'mask', label: 'Masque' },
+      { name: 'seed', type: 'int', default: 0, label: 'Graine (seed)' },
     ],
   },
   {
@@ -129,6 +130,7 @@ export const OPERATIONS = [
       { name: 'surface', type: 'block', label: 'Surface', showIf: { preset: 'custom' } },
       { name: 'soil', type: 'block', label: 'Sous-sol', showIf: { preset: 'custom' } },
       { name: 'filler', type: 'block', label: 'Roche profonde', showIf: { preset: 'custom' } },
+      { name: 'seed', type: 'int', default: 0, label: 'Graine (seed)' },
     ],
   },
   {
@@ -333,7 +335,7 @@ export function normalizeParams(operation, raw = {}) {
       const from = normBlock(raw.from); // null → toute la sélection
       const pattern = normPattern(raw.pattern);
       if (!pattern) return 'bad_pattern';
-      return { from: from?.name ? from : null, pattern, mask: normMask(raw.mask) };
+      return { from: from?.name ? from : null, pattern, mask: normMask(raw.mask), seed: num(raw.seed) || 0 };
     }
     case 'scale': {
       const factor = Number(raw.factor);
@@ -354,9 +356,13 @@ export function normalizeParams(operation, raw = {}) {
     case 'naturalize': {
       const presets = ['plains', 'forest', 'savanna', 'swamp', 'desert', 'badlands', 'snowy', 'mountain', 'stony_peaks', 'mushroom', 'auto', 'custom'];
       const preset = presets.includes(raw.preset) ? raw.preset : 'plains';
-      if (preset !== 'custom') return { preset };
+      // La graine passe dans TOUS les cas : ce normaliseur jette ce qu'il ne
+      // nomme pas, et une graine ignorée redonnerait un tirage non rejouable
+      // sans rien signaler.
+      const seed = num(raw.seed) || 0;
+      if (preset !== 'custom') return { preset, seed };
       return {
-        preset,
+        preset, seed,
         surface: normBlock(raw.surface)?.name || null,
         soil: normBlock(raw.soil)?.name || null,
         filler: normBlock(raw.filler)?.name || null,

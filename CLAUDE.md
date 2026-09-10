@@ -29,8 +29,11 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
    prouverait plus rien).
 3. **Les blocs `minefield:*` ne sont jamais remappés vanilla.** Leur géométrie
    et leurs états se transforment ; leur namespace, jamais.
-4. **Toute génération aléatoire prend une seed** et est rejouable. Les fonctions
-   qui tirent au sort acceptent un générateur injectable (voir `weightedPicker`).
+4. **Toute génération aléatoire prend une seed** et est rejouable. Un tirage PAR
+   BLOC se hache sur la position (`hash3(x, y, z, seed)`, `transform.js`), ce qui
+   le rend indépendant de l'ordre de parcours ; ailleurs, la fonction accepte un
+   générateur injectable (voir `weightedPicker`). Aucun `Math.random()` nu dans
+   `packages/we-engine/src/`.
 5. **Aucune écriture dans une save sans sauvegarde préalable**, et dans cet
    ordre : refuser si Minecraft tient le monde, sauvegarder en zip horodaté,
    puis écrire. Une sauvegarde prise après la première écriture ne sauvegarde
@@ -65,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (224 tests aujourd'hui : 199 moteur, 25 desktop)
+npm test          # tous les paquets (231 tests aujourd'hui : 206 moteur, 25 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -170,6 +173,17 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
 - **Une clé texte dans une boucle chaude.** Le recollage d'aperçu refabriquait
   `nom|propriétés` par bloc : 317 ms. Une table de correspondance calculée une
   fois par palette ramène la boucle à de l'entier.
+- **Un normaliseur qui jette ce qu'il ne nomme pas.** `normalizeParams`
+  (`worldedit/operations.js`) ne recopie que les paramètres qu'il liste, et le
+  cas non personnalisé de `naturalize` faisait `return { preset }`. Ajouter
+  `seed` au descripteur ET à l'opération n'aurait rien changé : la graine
+  disparaissait entre les deux, sans erreur. Un nouveau paramètre se branche à
+  TROIS endroits — descripteur, normaliseur, opération.
+- **Un tirage par bloc se hache sur la POSITION, pas sur un état.** Un
+  générateur à état ne rejoue identique que si la boucle visite les cases dans
+  le même ordre — contrainte invisible qu'une optimisation casserait sans
+  bruit. `hash3(x, y, z, seed)` est en plus stable par morceaux : remélanger un
+  coin d'une zone redonne les mêmes blocs qu'un mélange de la zone entière.
 - **Une couleur d'accent réglable casse le texte posé dessus.** Un accent sombre
   choisi par l'utilisateur donnait un bouton principal noir sur noir. `inkOn`
   (`theme.js`) tranche par contraste WCAG ; le test exige 4,5:1 sur chaque
