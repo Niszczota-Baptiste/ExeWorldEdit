@@ -19,7 +19,7 @@ import {
 import {
   DEFAULT_LIMITS, fdiv, buildExtent, buildLimits, validateSelection,
   clampBBox, unionBBox, regionKeysForBBox, panelPlane, weightedPicker,
-  PANEL_PRESETS, clamp01, tick,
+  PANEL_PRESETS, clamp01, tick, phaseTimer,
 } from './geometry.js';
 import { blankRegions, regionsToDownload } from './blank.js';
 
@@ -254,13 +254,18 @@ export function createStaging(adapter, options = {}) {
    */
   async function applyOperation({ project, operation, params, selection, actor, clipboard, onProgress }) {
     const startedAt = Date.now();
+    // Le chronomètre suit les mêmes phases que la barre de progression : ce que
+    // l'utilisateur voit défiler est exactement ce qui est mesuré.
+    const timer = phaseTimer();
     const progress = (phase, pct) => { onProgress?.(phase, pct); };
     const extent = buildExtent(project);
     const sel = checkSelection(selection, editLimits(project));
 
+    timer.enter('load');
     progress('load', 5);
     const store = loadStore(project);
     await store.warmup(extent); // décode les chunks du build (XZ) — Y libre ensuite
+    timer.enter('apply');
     progress('apply', 30); await tick();
     // Forme non rectangulaire → écritures bornées à la forme (sphère/cylindre).
     const target = sel.shape && sel.shape.type !== 'box' ? new MaskedVolume(store, sel) : store;
@@ -281,6 +286,7 @@ export function createStaging(adapter, options = {}) {
       const ctx = { yield: async () => { await tick(); progress('apply', 45); } };
       result = await fn(target, sel, params || {}, ctx);
     }
+    timer.enter('commit');
     progress('commit', 60); await tick();
 
     // Snapshot AVANT écriture : régions intersectant sélection ∪ emprise résultat.
@@ -288,20 +294,26 @@ export function createStaging(adapter, options = {}) {
     clearRedo(project.id); // une nouvelle opération invalide la pile de rétablissement
     writeRegions(project.id, store.commit({ touchedOnly: true }));
 
+    timer.enter('preview');
     progress('preview', 85); await tick();
     const sparse = growAndPreview(project, store, sel, result.bounds);
 
     const durationMs = Date.now() - startedAt;
+    const timings = timer.finish();
     adapter.appendAudit({
       projectId: project.id, actor, operation,
       params: { selection: sel, params: params || {} },
       blocksChanged: result.blocksChanged || 0, durationMs,
+      // Le relevé va AU JOURNAL, pas seulement à l'écran : une opération lente
+      // s'analyse souvent après coup, quand la barre de progression a disparu.
+      timings,
     });
 
     // `clipboard` n'est présent que pour `cut` (presse-papier rempli au passage).
     return {
       blocksChanged: result.blocksChanged || 0, bounds: result.bounds || sel,
       clipboard: result.clipboard, durationMs, previewTruncated: !!sparse.truncated,
+      timings,
     };
   }
 

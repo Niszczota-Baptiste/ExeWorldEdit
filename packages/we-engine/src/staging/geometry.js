@@ -140,3 +140,52 @@ export const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
 /** Rend la main à la boucle d'événements (l'interface reste réactive). */
 export const tick = () => new Promise((r) => setImmediate(r));
+
+/**
+ * Chronomètre par phase d'une opération.
+ *
+ * Une opération lente n'apprend rien tant qu'on ne sait pas OÙ elle est lente :
+ * décoder les régions, calculer, réécrire, ou redériver l'aperçu. Ces quatre
+ * postes n'ont pas les mêmes remèdes, et sans mesure on optimise au jugé — ce
+ * qui a déjà coûté une hypothèse fausse à la phase 1.1.
+ *
+ * Le résultat est joint à chaque opération et consigné au journal, donc
+ * consultable après coup et pas seulement pendant.
+ *
+ * @param {() => number} [now] injectable pour les tests
+ */
+export function phaseTimer(now = () => Date.now()) {
+  const startedAt = now();
+  const phases = [];
+  let current = null;
+  let mark = startedAt;
+
+  const close = () => {
+    if (!current) return;
+    phases.push({ phase: current, ms: now() - mark });
+    current = null;
+  };
+
+  return {
+    /** Ferme la phase en cours et en ouvre une nouvelle. */
+    enter(phase) {
+      close();
+      current = phase;
+      mark = now();
+    },
+    /** Ferme la dernière phase et rend le relevé complet. */
+    finish() {
+      close();
+      const totalMs = now() - startedAt;
+      // Le reliquat, c'est ce que les phases n'ont pas couvert : validation,
+      // journalisation, allers-retours. Le taire ferait croire à un total
+      // qui ne tombe pas juste.
+      const covered = phases.reduce((s, p) => s + p.ms, 0);
+      const rest = Math.max(0, totalMs - covered);
+      return {
+        totalMs,
+        phases: rest > 0 ? [...phases, { phase: 'reste', ms: rest }] : phases,
+      };
+    },
+  };
+}

@@ -35,8 +35,13 @@
 //     params:        objet libre (sélection, paramètres de l'opération),
 //     blocksChanged: number,
 //     durationMs:    number,
+//     timings:       { totalMs, phases: [{phase, ms}] }|null,
 //     createdAt:     string ISO      (posé par l'adapter à l'écriture)
 //   }
+//
+//   `timings` est le relevé par phase de l'opération. Il est CONSIGNÉ et pas
+//   seulement affiché : une opération lente s'analyse le plus souvent après
+//   coup, quand la barre de progression a disparu.
 //
 // SchematicMeta — une entrée de bibliothèque :
 //   { id, name, sx, sy, sz, blockCount, createdAt }
@@ -100,6 +105,20 @@ export class StorageAdapter {
   /** Plus récentes d'abord. @returns {AuditEntry[]} */
   // eslint-disable-next-line no-unused-vars
   listAudit(projectId, limit) { return notImplemented('listAudit'); }
+
+  // ── Réglages ──────────────────────────────────────────────────────────────
+  //
+  // Un objet libre, propre à l'application : apparence, mode performance,
+  // plafonds du moteur. Il passe par l'adapter plutôt que par le stockage du
+  // navigateur, pour deux raisons — le renderer n'a pas accès au disque, et les
+  // plafonds servent AU MOTEUR, qui ne lit pas un `localStorage`.
+
+  /** @returns {object} les réglages enregistrés, `{}` si aucun. */
+  readSettings() { return notImplemented('readSettings'); }
+
+  /** Fusionne un correctif dans les réglages. @returns {object} le résultat. */
+  // eslint-disable-next-line no-unused-vars
+  writeSettings(patch) { return notImplemented('writeSettings'); }
 
   // ── Bibliothèque de schematics ────────────────────────────────────────────
   //

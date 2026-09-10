@@ -216,3 +216,53 @@ test('FsAdapter — un projet sans monde attaché le dit par null', () => {
   a.saveProject({ id: 'p1', name: 'Schematic' });
   assert.equal(a.getProject('p1').world, null);
 });
+
+// ── Réglages ────────────────────────────────────────────────────────────────
+
+test('FsAdapter — des réglages absents rendent un objet vide, pas null', () => {
+  const a = tmpAdapter();
+  assert.deepEqual(a.readSettings(), {});
+});
+
+test('FsAdapter — écrire des réglages FUSIONNE au lieu de remplacer', () => {
+  const a = tmpAdapter();
+  a.writeSettings({ theme: 'sombre', textScale: 1 });
+  a.writeSettings({ textScale: 1.2 });
+  // Sans fusion, un panneau qui ne connaît qu'un réglage effacerait les autres.
+  assert.deepEqual(a.readSettings(), { theme: 'sombre', textScale: 1.2 });
+});
+
+test('FsAdapter — les réglages survivent à un redémarrage', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'we-engine-'));
+  roots.push(root);
+  new FsAdapter({ root }).writeSettings({ perf: true });
+  assert.equal(new FsAdapter({ root }).readSettings().perf, true);
+});
+
+test('FsAdapter — un settings.json corrompu ne fait pas tomber l’application', () => {
+  const a = tmpAdapter();
+  a.writeSettings({ theme: 'sombre' });
+  fs.writeFileSync(path.join(a.root, 'settings.json'), '{ pas du json');
+  // Mieux vaut repartir des valeurs par défaut que refuser de démarrer.
+  assert.deepEqual(a.readSettings(), {});
+  assert.deepEqual(a.writeSettings({ theme: 'clair' }), { theme: 'clair' });
+});
+
+test('FsAdapter — le journal conserve le relevé par phase', () => {
+  const a = tmpAdapter();
+  a.saveProject({ id: 'p1', name: 'x' });
+  a.appendAudit({
+    projectId: 'p1', operation: 'terrain', durationMs: 900,
+    timings: { totalMs: 900, phases: [{ phase: 'load', ms: 700 }, { phase: 'apply', ms: 200 }] },
+  });
+  const [ligne] = a.listAudit('p1');
+  assert.equal(ligne.timings.totalMs, 900);
+  assert.deepEqual(ligne.timings.phases[0], { phase: 'load', ms: 700 });
+});
+
+test('FsAdapter — une opération sans relevé le dit par null', () => {
+  const a = tmpAdapter();
+  a.saveProject({ id: 'p1', name: 'x' });
+  a.appendAudit({ projectId: 'p1', operation: 'undo' });
+  assert.equal(a.listAudit('p1')[0].timings, null);
+});

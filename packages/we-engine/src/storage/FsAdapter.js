@@ -20,6 +20,7 @@ import { StorageAdapter } from './StorageAdapter.js';
 //   │     ├─ undo/<n>/ redo/<n>/   snapshots des régions touchées
 //   │     ├─ preview.json.gz       aperçu 3D dérivé
 //   │     └─ audit.jsonl           journal, une ligne JSON par opération
+//   ├─ settings.json               réglages de l'application
 //   └─ library/
 //      ├─ <scope>.json             index des schematics
 //      └─ blobs/<uuid>.we.gz
@@ -166,6 +167,23 @@ export class FsAdapter extends StorageAdapter {
     return fs.readFileSync(path.join(this.projectDir(project.id), 'source', project.source.file));
   }
 
+  // ── Réglages ──────────────────────────────────────────────────────────────
+
+  get _settingsFile() { return path.join(this.root, 'settings.json'); }
+
+  readSettings() {
+    return readJson(this._settingsFile, {}) || {};
+  }
+
+  writeSettings(patch) {
+    // Fusion et non remplacement : l'appelant ne connaît pas forcément tous les
+    // réglages existants, et écraser ceux qu'il ignore serait une surprise.
+    const next = { ...this.readSettings(), ...(patch || {}) };
+    fs.mkdirSync(this.root, { recursive: true });
+    writeJson(this._settingsFile, next);
+    return next;
+  }
+
   // ── Journal d'audit ───────────────────────────────────────────────────────
 
   appendAudit(entry) {
@@ -178,6 +196,7 @@ export class FsAdapter extends StorageAdapter {
       params: entry.params || {},
       blocksChanged: entry.blocksChanged || 0,
       durationMs: entry.durationMs ?? null,
+      timings: entry.timings || null,
       createdAt: new Date().toISOString(),
     };
     fs.appendFileSync(file, `${JSON.stringify(line)}\n`);

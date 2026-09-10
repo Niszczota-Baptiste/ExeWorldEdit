@@ -633,3 +633,58 @@ test('un fichier qui n’est pas un schematic est refusé', async () => {
   const { schematicToRegions } = await import('../src/staging/index.js');
   await assert.rejects(schematicToRegions(Buffer.from('ceci n’est pas du NBT'), 'x.schem'));
 });
+
+// ── Relevé de performance ───────────────────────────────────────────────────
+
+test('phaseTimer découpe une opération et n’oublie pas le reliquat', async () => {
+  const { phaseTimer } = await import('../src/staging/index.js');
+  let horloge = 1000;
+  const t = phaseTimer(() => horloge);
+
+  horloge += 5;            // 5 ms avant la première phase → reliquat
+  t.enter('load'); horloge += 120;
+  t.enter('apply'); horloge += 40;
+  t.enter('commit'); horloge += 10;
+  const out = t.finish();
+
+  assert.equal(out.totalMs, 175);
+  assert.deepEqual(out.phases, [
+    { phase: 'load', ms: 120 },
+    { phase: 'apply', ms: 40 },
+    { phase: 'commit', ms: 10 },
+    // Ce que les phases n'ont pas couvert doit apparaître : un total qui ne
+    // tombe pas juste ferait douter de toute la mesure.
+    { phase: 'reste', ms: 5 },
+  ]);
+});
+
+test('phaseTimer sans reliquat n’invente pas de phase', async () => {
+  const { phaseTimer } = await import('../src/staging/index.js');
+  let horloge = 0;
+  const t = phaseTimer(() => horloge);
+  t.enter('load'); horloge += 30;
+  const out = t.finish();
+  assert.deepEqual(out.phases, [{ phase: 'load', ms: 30 }]);
+  assert.equal(out.totalMs, 30);
+});
+
+test('une opération rend son relevé par phase, et le journal le garde', async () => {
+  const { staging, project } = makeProject();
+  const res = await staging.applyOperation({
+    project: project(), operation: 'set',
+    params: { block: { name: OAK } }, selection: ONE(1, 1, 1), actor: 'moi',
+  });
+
+  const noms = res.timings.phases.map((p) => p.phase);
+  assert.ok(noms.includes('load'), 'la phase de chargement est mesurée');
+  assert.ok(noms.includes('apply'));
+  assert.ok(noms.includes('commit'));
+  assert.ok(noms.includes('preview'));
+  assert.ok(res.timings.totalMs >= 0);
+
+  // Une opération lente s'analyse souvent APRÈS coup : le relevé doit survivre
+  // à la disparition de la barre de progression.
+  const [ligne] = staging.listAudit('p1');
+  assert.ok(ligne.timings, 'le journal conserve le relevé');
+  assert.deepEqual(ligne.timings.phases.map((p) => p.phase), noms);
+});
