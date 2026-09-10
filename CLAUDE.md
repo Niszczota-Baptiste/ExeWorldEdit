@@ -65,7 +65,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (211 tests aujourd'hui : 186 moteur, 25 desktop)
+npm test          # tous les paquets (224 tests aujourd'hui : 199 moteur, 25 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -91,7 +91,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 
 | Ajouter… | …dans |
 |---|---|
-| Une opération WorldEdit | `packages/we-engine/src/worldedit/transform.js` + son entrée dans `OPS` (`src/staging/staging.js`) + son descripteur dans `operations.js` + ses tests |
+| Une opération WorldEdit | `packages/we-engine/src/worldedit/transform.js` + son entrée dans `OPS` (`src/staging/staging.js`) + son descripteur dans `operations.js` + ses tests. Elle DOIT rendre des `bounds` couvrant tout ce qu'elle écrit : l'instantané d'annulation ET l'aperçu incrémental s'y fient |
 | Une propriété d'état de bloc à transformer | `src/worldedit/blockstates.js` + une assertion par propriété dans `test/worldedit.test.js` |
 | Un format d'échange | `src/worldedit/schematicFormats.js` + un test de round-trip |
 | Une chose qui dépend d'où vivent les données | une méthode du `StorageAdapter` + son cas dans la suite de contrat (`test/storage.test.js`) |
@@ -161,6 +161,15 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   donnée qui arrive plus tard va dans un effet.
 - **Une grille en `1fr` s'étire.** La carte des régions doit garder ses
   proportions de monde : colonnes à taille fixe, jamais `1fr`.
+- **Compresser un fichier de CACHE au niveau par défaut.** L'aperçu passait
+  457 ms dans gzip pour gagner 350 ko sur un fichier qu'on régénère à volonté.
+  Niveau 1 : 67 ms. Un cache s'optimise pour le temps, pas pour la place.
+- **Repasser d'un tableau typé à un tableau JS coûte cher.** 850 000 blocs :
+  160 ms pour convertir un `Int32Array`, 16 ms pour remplir un `Array`
+  prédimensionné par index. Ce qui finit en JSON doit naître en `Array`.
+- **Une clé texte dans une boucle chaude.** Le recollage d'aperçu refabriquait
+  `nom|propriétés` par bloc : 317 ms. Une table de correspondance calculée une
+  fois par palette ramène la boucle à de l'entier.
 - **Une couleur d'accent réglable casse le texte posé dessus.** Un accent sombre
   choisi par l'utilisateur donnait un bouton principal noir sur noir. `inkOn`
   (`theme.js`) tranche par contraste WCAG ; le test exige 4,5:1 sur chaque

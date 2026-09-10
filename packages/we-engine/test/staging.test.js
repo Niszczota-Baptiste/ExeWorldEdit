@@ -688,3 +688,83 @@ test('une opération rend son relevé par phase, et le journal le garde', async 
   assert.ok(ligne.timings, 'le journal conserve le relevé');
   assert.deepEqual(ligne.timings.phases.map((p) => p.phase), noms);
 });
+
+// ── Aperçu incrémental ──────────────────────────────────────────────────────
+//
+// `growAndPreview` ne redérive plus l'emprise entière : il recolle la seule
+// boîte touchée sur l'aperçu précédent. Un recollage faux ne plante pas, il
+// affiche un build légèrement faux — donc le seul test qui prouve quelque
+// chose est la comparaison avec la dérivation complète, qui reste l'autorité.
+
+/** L'aperçu réduit à « quel bloc à quelle place », en coordonnées monde. */
+const previewWorld = (p) => {
+  const out = new Map();
+  for (let i = 0; i < p.blocks.length; i += 4) {
+    out.set(
+      `${p.min.x + p.blocks[i]},${p.min.y + p.blocks[i + 1]},${p.min.z + p.blocks[i + 2]}`,
+      p.palette[p.blocks[i + 3]].name,
+    );
+  }
+  return out;
+};
+
+test('l’aperçu recollé est identique à une dérivation complète', async () => {
+  const { staging, project } = makeProject();
+
+  // Une suite d'opérations de natures différentes : remplissage, remplacement,
+  // forme, déplacement — chacune touche une boîte différente et fait grandir
+  // ou non l'emprise.
+  const etapes = [
+    ['set', { block: { name: 'minecraft:glass' } }, sel({ x: 1, y: 1, z: 1 }, { x: 4, y: 3, z: 4 })],
+    ['replace', { from: { name: STONE }, to: { name: 'minecraft:dirt' } }, sel({ x: 0, y: 0, z: 0 }, { x: 7, y: 0, z: 7 })],
+    ['sphere', { block: { name: 'minecraft:oak_log' }, radius: 2 }, sel({ x: 6, y: 6, z: 6 }, { x: 12, y: 12, z: 12 })],
+    // Effacer : la boîte touchée doit RETIRER des blocs de l'aperçu, pas
+    // seulement en réécrire — c'est le cas que le recollage rate le plus vite.
+    ['set', { block: { name: 'minecraft:air' } }, sel({ x: 2, y: 1, z: 2 }, { x: 3, y: 2, z: 3 })],
+    // `stack` écrit HORS de la sélection : c'est lui qui vérifie que la boîte
+    // touchée suit bien `bounds` et pas seulement la sélection.
+    ['stack', { count: 2, direction: 'up' }, sel({ x: 0, y: 0, z: 0 }, { x: 5, y: 2, z: 5 })],
+  ];
+
+  for (const [operation, params, selection] of etapes) {
+    await staging.applyOperation({ project: project(), operation, params, selection, actor: 't' });
+
+    const incremental = previewWorld(staging.readPreview('p1'));
+    // `regenPreview` repart du staging sur disque et redérive TOUT : c'est la
+    // vérité de référence, indépendante du chemin incrémental.
+    await staging.regenPreview(project());
+    const complet = previewWorld(staging.readPreview('p1'));
+
+    assert.deepEqual(incremental, complet, `après « ${operation} », le recollage diverge`);
+  }
+});
+
+test('la nomenclature recollée compte juste', async () => {
+  const { staging, project } = makeProject();
+  await staging.applyOperation({
+    project: project(), operation: 'set', params: { block: { name: 'minecraft:glass' } },
+    selection: sel({ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 3 }), actor: 't',
+  });
+
+  const incremental = staging.readPreview('p1');
+  await staging.regenPreview(project());
+  const complet = staging.readPreview('p1');
+
+  const bom = (p) => Object.fromEntries(p.bom.map((b) => [b.blockId, b.count]));
+  assert.deepEqual(bom(incremental), bom(complet));
+  assert.equal(incremental.count, complet.count);
+  assert.equal(bom(incremental)['minecraft:glass'], 16, '4 × 4 cases remplacées');
+});
+
+test('annuler puis refaire retombe sur le même aperçu', async () => {
+  const { staging, project } = makeProject();
+  const avant = previewWorld((await staging.regenPreview(project()), staging.readPreview('p1')));
+
+  await staging.applyOperation({
+    project: project(), operation: 'set', params: { block: { name: 'minecraft:glass' } },
+    selection: sel({ x: 1, y: 1, z: 1 }, { x: 2, y: 2, z: 2 }), actor: 't',
+  });
+  await staging.undoLast({ project: project(), actor: 't' });
+
+  assert.deepEqual(previewWorld(staging.readPreview('p1')), avant);
+});

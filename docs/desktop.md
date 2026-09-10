@@ -321,22 +321,110 @@ accident, la même phase lente dix fois est une cible.
 
 ### Ce que le relevé a montré tout de suite
 
-Sur le build de démonstration (192 × 192, 850 000 blocs, 12 opérations) :
+Sur le build de démonstration (192 × 192, 850 000 blocs, 12 opérations), le
+premier cumul affiché était sans appel :
 
 ```
-Cumul sur 12 opérations
 aperçu 82 %  ·  calcul 9 %  ·  lecture 6 %  ·  écriture 3 %  ·  reste 0 %
 ```
 
-**82 % du temps du moteur part à régénérer l'aperçu.** Poser 121 blocs avec
-`set` coûte 815 ms, dont 761 ms (93 %) d'aperçu. La cause est structurelle :
-`regenPreview` reparcourt l'emprise ENTIÈRE du build après chaque opération —
-2,1 millions de cases ici — quel que soit le nombre de blocs réellement changés.
+**82 % du temps du moteur partait à régénérer l'aperçu.** Poser 121 blocs avec
+`set` coûtait 815 ms, dont 761 ms d'aperçu.
 
-C'est une cible de la phase 1.2, pas de ce commit : un aperçu incrémental ne
-redériverait que les chunks touchés, que `applyOperation` connaît déjà (il rend
-déjà `bounds`). La noter ici plutôt que la corriger au passage, c'est justement
-la leçon de la phase 1.1 — on mesure d'abord, on optimise ensuite.
+---
+
+## Rendre l'aperçu incrémental
+
+La piste évidente — « ne pas afficher ce qu'on ne voit pas » — a été mesurée
+avant d'être suivie, et elle ne menait pas là où on croyait.
+
+### Les faces sont déjà culées
+
+Le mailleur n'émet une face qu'entre un plein et un vide. Sur le build de
+démonstration : **849 954 blocs → 52 362 quads**, là où six faces par bloc en
+feraient 5,1 millions. Il n'y a rien à gagner de ce côté.
+
+### Les blocs enterrés, eux, sont bien du poids mort — mais on ne peut pas les jeter
+
+| | blocs | part |
+|---|---|---|
+| enterrés (six voisins pleins) | 751 880 | **88,5 %** |
+| visibles | 98 074 | 11,5 % |
+
+Sauf qu'en les retirant, le mailleur voit de l'air à l'intérieur et dessine la
+coque intérieure : **52 362 → 98 345 quads, +87,8 %**. On diviserait les données
+par neuf pour doubler les triangles. Et le curseur de couche étant un plan de
+coupe three.js et non un filtre, trancher dans une coque creuse montrerait un
+build vide au milieu.
+
+L'**occupation** de ces blocs porte du sens même quand leur **identité** n'en
+porte pas : c'est elle qui dit au mailleur de ne pas dessiner. Une extraction
+« surface seule » demanderait donc une sentinelle « plein, non listé » connue du
+mailleur — ce n'est pas fait, et ce n'était de toute façon pas le vrai coupable.
+
+### Le vrai coupable : la sérialisation, puis le parcours
+
+Décomposition de la phase `preview` (~1 s) :
+
+| | avant |
+|---|---|
+| **gzip** | **457 ms** |
+| `deriveSparse` (parcours de l'emprise) | 338 ms |
+| warmup | 101–198 ms |
+| `JSON.stringify` | 77 ms |
+
+La moitié partait à compresser un **fichier de cache local**, au niveau par
+défaut. Le niveau 1 coûte 67 ms pour 350 ko de plus : 390 ms rendus sur une
+ligne.
+
+Le reste tient au fait que l'aperçu était redérivé **en entier** après chaque
+opération. Or `applyOperation` connaît déjà la boîte qu'il a touchée — c'est
+celle dont il prend l'instantané d'annulation, `sel ∪ bounds`. `splicePreview`
+(`src/staging/preview.js`, pur) redérive cette seule boîte et la recolle sur
+l'aperçu précédent.
+
+Ce n'est pas un choix de confort : **si une opération écrivait hors de cette
+boîte, l'annulation serait déjà fausse**. Le recollage est donc exactement aussi
+fiable que l'undo, ni plus ni moins. Il renvoie `null` — et l'appelant redérive
+tout — dès qu'il ne peut rien garantir : aperçu source tronqué, ou budget
+dépassé en cours de route.
+
+### Deux pièges de mesure en chemin
+
+Le premier jet n'a rendu que 25 %. La mesure a dit pourquoi, deux fois :
+
+1. **La boucle chaude refabriquait une clé texte de palette par bloc** —
+   850 000 concaténations et autant de recherches dans une `Map`. Une table de
+   correspondance calculée une fois par palette ramène la boucle à de l'entier :
+   317 → 184 ms.
+2. **Repasser d'un `Int32Array` à un tableau JS coûtait 160 ms.** L'aperçu finit
+   en JSON, donc le tampon doit être un `Array` ordinaire — prédimensionné et
+   rempli par index, c'est 16 ms. Dix fois moins, pour un détail de type.
+
+Et `readPreview` relisait à chaque opération (gunzip 48 ms + `JSON.parse`
+161 ms) un objet qu'on venait soi-même d'écrire : une case de cache en mémoire,
+posée dans `writePreview`/`readPreview` pour ne pas pouvoir se désynchroniser,
+supprime ces 209 ms.
+
+### Résultat
+
+| phase | avant | après | |
+|---|---|---|---|
+| lecture | 732 ms | 634 ms | −13 % |
+| calcul | 1 233 ms | 1 130 ms | −8 % |
+| écriture | 427 ms | 379 ms | −11 % |
+| **aperçu** | **10 879 ms** | **2 825 ms** | **−74 %** |
+| **total** | **13 276 ms** | **4 968 ms** | **−63 %** |
+
+L'aperçu est **3,9 × plus rapide** et retombe de 82 % à 57 % du temps moteur.
+Sur les petites opérations, celles qu'on enchaîne : `set` de 121 blocs passe de
+**815 ms à 239 ms**, `path` de 847 à 243 ms.
+
+Le plancher restant est structurel : on resérialise l'aperçu entier à chaque
+opération (`JSON.stringify` 46 ms + gzip 76 ms + recollage ~40 ms), quel que
+soit le nombre de blocs changés. Descendre plus bas demande de changer le
+FORMAT de l'aperçu — binaire, ou découpé par chunk — ce qui touche aussi le
+renderer. Phase 1.2 également.
 
 ---
 
@@ -363,9 +451,16 @@ la leçon de la phase 1.1 — on mesure d'abord, on optimise ensuite.
   texte et fait un `findIndex` sur la palette de section à chaque bloc,
   `getBlock` alloue un objet par appel. Phase 1.2.
 - **Un seul fil d'exécution.** Pas de pool de workers. Phase 1.2.
-- **L'aperçu se redérive en entier** après chaque opération, alors que
-  `applyOperation` sait déjà quelles bornes ont bougé. C'est 82 % du temps
-  moteur mesuré sur le build de démonstration. Phase 1.2.
+- **L'aperçu se resérialise en entier** à chaque opération, même pour un bloc
+  changé : `JSON.stringify` + gzip forment un plancher d'environ 120 ms. Le
+  parcours, lui, est devenu incrémental. Descendre plus bas demande un format
+  binaire ou découpé par chunk, donc de toucher aussi le renderer. Phase 1.2.
+- **Deux tirages aléatoires ignorent la seed** : `opMix` et `fillerPicker`
+  (`worldedit/transform.js`) appellent `Math.random()` au lieu du générateur
+  injectable, contrairement à `weightedPicker`. Deux exécutions de
+  `make-demo.js` avec la même seed ne rendent donc pas le même build
+  (« Massif rocheux » : 105 369 puis 105 385 blocs). Ça casse l'invariant n° 4
+  et ça n'a rien à voir avec l'aperçu — antérieur à ce travail, à corriger.
 
 ### Ce que le viewport ne fait pas encore
 
@@ -494,7 +589,7 @@ jetable sans toucher au vrai.
 | 2.5 | Viewport | maillage par chunk + AO **fait** ; atlas de textures et modèles non cubiques à venir |
 | 2.6 | Empaquetage | configuration electron-builder écrite, jamais exécutée sur Windows |
 | 1.1 | Mesurer | **fait** — `bench/`, 16 scénarios, `RESULTS.md` |
-| 1.2 | Moteur rapide | dépack de sections **× 10,7** ; reste : aperçu incrémental (82 % du temps mesuré), `RegionStore` en tableaux typés, pool de workers, plafonds réglables |
+| 1.2 | Moteur rapide | dépack de sections **× 10,7**, aperçu incrémental **× 3,9** (−63 % sur le total) ; reste : format d'aperçu binaire, `RegionStore` en tableaux typés, pool de workers, plafonds réglables |
 | 1.3 | Entités | à venir |
 | 3 | Brushs | à venir |
 | 4 | Tracés, PNJ, dispersion | à venir |

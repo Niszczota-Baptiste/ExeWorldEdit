@@ -22,6 +22,7 @@ import {
   PANEL_PRESETS, clamp01, tick, phaseTimer,
 } from './geometry.js';
 import { blankRegions, regionsToDownload } from './blank.js';
+import { splicePreview } from './preview.js';
 
 // Orchestration NON DESTRUCTIVE des opérations WorldEdit.
 //
@@ -197,8 +198,27 @@ export function createStaging(adapter, options = {}) {
 
   // ── Aperçu ────────────────────────────────────────────────────────────────
 
+  // Niveau 1 et non le niveau par défaut : mesuré sur le build de démonstration,
+  // compresser 9,7 Mo d'aperçu coûtait 457 ms au défaut contre 67 ms au niveau 1,
+  // pour 350 ko de plus. C'est un FICHIER DE CACHE local, régénérable à volonté —
+  // payer 390 ms par opération pour l'alléger d'un tiers n'a aucun sens.
+  const PREVIEW_GZIP = { level: 1 };
+
+  // Dernier aperçu écrit, gardé en mémoire. Le recollage a besoin du précédent
+  // à chaque opération, et le relire coûtait 209 ms (48 de gunzip, 161 de
+  // `JSON.parse`) pour un objet qu'on venait soi-même d'écrire.
+  //
+  // Le cache est posé DANS `writePreview` et `readPreview` : toute écriture
+  // passe par là, donc il ne peut pas se désynchroniser du fichier.
+  //
+  // UNE seule case, pas une table : un aperçu de 850 000 blocs pèse ~27 Mo en
+  // mémoire, et on n'édite qu'un build à la fois. Changer de projet évince, ce
+  // qui coûte une relecture — pas une fuite.
+  let previewCache = null; // { id, sparse }
+
   function writePreview(id, sparse) {
-    fs.writeFileSync(previewPath(id), zlib.gzipSync(Buffer.from(JSON.stringify(sparse))));
+    fs.writeFileSync(previewPath(id), zlib.gzipSync(Buffer.from(JSON.stringify(sparse)), PREVIEW_GZIP));
+    previewCache = { id, sparse };
   }
 
   /**
@@ -209,6 +229,26 @@ export function createStaging(adapter, options = {}) {
   function growAndPreview(project, store, sel, resultBounds) {
     const grown = clampBBox(unionBBox(buildExtent(project), resultBounds || sel), editLimits(project));
     adapter.saveExtent(project.id, grown);
+
+    // Redériver l'emprise ENTIÈRE après chaque opération coûtait 82 % du temps
+    // du moteur : 2,1 millions de cases reparcourues pour en changer 121. On ne
+    // redérive donc que la boîte touchée, et on la recolle sur l'aperçu
+    // précédent.
+    //
+    // La boîte touchée est `sel ∪ bounds` — exactement celle dont on vient de
+    // prendre l'instantané d'annulation. Ce n'est pas un choix de confort : si
+    // une opération écrivait hors de cette boîte, l'undo serait DÉJÀ faux. Le
+    // recollage est donc aussi fiable que l'annulation, ni plus ni moins.
+    const dirty = clampBBox(unionBBox(sel, resultBounds || sel), grown);
+    const base = readPreview(project.id);
+    if (base) {
+      const patch = store.deriveSparse(dirty, limits.previewMaxBlocks, { truncate: true });
+      const spliced = splicePreview({ base, patch, dirty, extent: grown, maxBlocks: limits.previewMaxBlocks });
+      // `null` = le recollage ne peut rien garantir (source tronquée, budget
+      // dépassé). On retombe sur la dérivation complète, qui tronque proprement.
+      if (spliced) { writePreview(project.id, spliced); return spliced; }
+    }
+
     // Aperçu PARTIEL au-delà du budget : la commande, elle, a tout écrit.
     const sparse = store.deriveSparse(grown, limits.previewMaxBlocks, { truncate: true });
     writePreview(project.id, sparse);
@@ -244,8 +284,14 @@ export function createStaging(adapter, options = {}) {
 
   function readPreview(id) {
     const p = previewFilePath(id);
-    if (!p) return null;
-    return JSON.parse(zlib.gunzipSync(fs.readFileSync(p)).toString('utf8'));
+    if (!p) {
+      if (previewCache?.id === id) previewCache = null;
+      return null;
+    }
+    if (previewCache?.id === id) return previewCache.sparse;
+    const sparse = JSON.parse(zlib.gunzipSync(fs.readFileSync(p)).toString('utf8'));
+    previewCache = { id, sparse };
+    return sparse;
   }
 
   /**
@@ -530,6 +576,7 @@ export function createStaging(adapter, options = {}) {
   /** Jette toutes les modifications : la prochaine op repart de la source. */
   function resetStaging(id) {
     fs.rmSync(dirFor(id), { recursive: true, force: true });
+    if (previewCache?.id === id) previewCache = null;
   }
 
   // ── Export ────────────────────────────────────────────────────────────────
