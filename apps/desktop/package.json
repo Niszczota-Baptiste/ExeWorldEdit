@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "description": "Titi WorldEdit — application Windows (Electron + Vite + React)",
+  "author": {
+    "name": "Baptiste Niszczota",
+    "email": "baptisteniszczota@gmail.com"
+  },
   "scripts": {
     "dev": "concurrently -k -n vite,electron -c cyan,magenta \"vite\" \"wait-on tcp:5180 && cross-env TITI_DEV_SERVER=http://localhost:5180 electron .\"",
     "build": "vite build",
@@ -13,26 +17,26 @@
     "test": "node --test \"test/*.test.js\""
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.7.0",
-    "electron": "^44.3.0",
-    "electron-builder": "^26.15.3",
-    "vite": "^6.4.3"
-  },
-  "dependencies": {
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-select": "^2.3.7",
     "@radix-ui/react-slider": "^1.4.7",
     "@radix-ui/react-tabs": "^1.1.21",
     "@radix-ui/react-tooltip": "^1.2.16",
     "@tanstack/react-virtual": "^3.14.11",
-    "@titi/we-engine": "*",
+    "@vitejs/plugin-react": "^4.7.0",
     "cmdk": "^1.1.1",
+    "electron": "44.3.0",
+    "electron-builder": "^26.15.3",
     "lucide-react": "^1.44.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-resizable-panels": "^2.1.9",
     "three": "^0.170.0",
+    "vite": "^6.4.3",
     "zustand": "^5.0.15"
+  },
+  "dependencies": {
+    "@titi/we-engine": "*"
   },
   "main": "src/main/index.js"
 }

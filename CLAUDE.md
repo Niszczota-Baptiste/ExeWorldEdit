@@ -166,6 +166,14 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   donnée qui arrive plus tard va dans un effet.
 - **Une grille en `1fr` s'étire.** La carte des régions doit garder ses
   proportions de monde : colonnes à taille fixe, jamais `1fr`.
+- **Ce qui est bundlé ne doit PAS être en `dependencies`.** electron-builder
+  embarque toujours les dépendances de production, quels que soient les motifs
+  `files:` — et Vite avait déjà mis `react`, `three` et le reste dans
+  `dist/renderer`. Ils partaient donc deux fois : asar de 53 Mo au lieu de 11.
+  Critère : ne reste en `dependencies` que ce qu'un processus NODE importe à
+  l'exécution — ici `@titi/we-engine`, et rien d'autre.
+- **electron-builder exige une version d'Electron EXACTE.** Un `^` fait échouer
+  `npm run dist` d'entrée : il télécharge les binaires d'une release précise.
 - **Des guillemets simples dans un script npm ne survivent pas à Windows.**
   `node --test 'test/*.test.js'` marchait sous bash et rendait **zéro test** sous
   PowerShell — en sortant en SUCCÈS. cmd ne retire pas les apostrophes : Node

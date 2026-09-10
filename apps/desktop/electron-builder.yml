@@ -22,13 +22,9 @@ extraMetadata:
 
 asar: true
 asarUnpack:
-  # `sharp` charge des binaires natifs et ne peut pas être lu depuis l'archive.
-  # `@img/**` est indispensable en plus de `sharp/**` : depuis la version 0.33,
-  # les binaires vivent dans des paquets frères `@img/sharp-*`, et les oublier
-  # est LA panne classique d'un premier empaquetage.
-  - '**/node_modules/sharp/**'
-  - '**/node_modules/@img/**'
-  # La police est lue par `fs.readFileSync` dans le moteur de rendu de texte.
+  # La police Unifont est lue par `fs.readFileSync` dans le moteur de rendu de
+  # texte : un fichier lu par chemin ne peut pas vivre dans l'archive asar.
+  # C'est la SEULE chose à en sortir — ce projet n'a aucune dépendance native.
   - '**/node_modules/@titi/we-engine/assets/**'
 
 win:

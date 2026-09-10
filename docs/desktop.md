@@ -744,6 +744,68 @@ reçu la sienne, motivée. Un avertissement qui traîne en cache un vrai.
 
 ---
 
+## Empaqueter : trois défauts que la première tentative révèle
+
+La configuration `electron-builder.yml` existait mais n'avait jamais tourné. La
+lancer a suffi à trouver trois choses.
+
+### 1. Une plage de version bloque tout
+
+```
+⨯ Electron version "^44.3.0" is a range, not a fixed version.
+```
+
+electron-builder télécharge les binaires d'une release PRÉCISE ; un accent
+circonflexe ne se résout pas. La version doit être épinglée à l'exact
+(`"electron": "44.3.0"`). C'est la première erreur qu'aurait vue quiconque lance
+`npm run dist`.
+
+### 2. `sharp` n'a jamais été une dépendance de ce projet
+
+`asarUnpack` sortait `sharp/**` et `@img/**` de l'archive, avec un long
+commentaire expliquant pourquoi c'est indispensable. Sauf que ce projet n'a
+aucune dépendance native : la configuration venait d'ailleurs. Une consigne
+fausse est pire qu'une absence de consigne — elle se recopie.
+
+Seule la police Unifont doit réellement sortir de l'asar : le moteur de rendu de
+texte la lit par chemin avec `fs.readFileSync`.
+
+### 3. Le renderer était livré DEUX FOIS
+
+`react`, `three`, `@radix-ui/*`, `cmdk`, `zustand` étaient déclarés en
+`dependencies`. Or electron-builder embarque **toujours** les dépendances de
+production, quels que soient les motifs `files:`. Et Vite les avait déjà
+empaquetées dans `dist/renderer`.
+
+Résultat : les mêmes bibliothèques dans le bundle **et** en `node_modules` brut
+dans l'archive.
+
+| | avant | après |
+|---|---|---|
+| `app.asar` | 53 Mo | **11 Mo** |
+| dossier complet | 340 Mo | **298 Mo** |
+
+Le critère est simple : un paquet ne doit contenir que ce qu'un processus
+**Node** importe à l'exécution. Ici la liste tient en une ligne —
+`@titi/we-engine` et ses dépendances (`prismarine-nbt`, `protodef`,
+`opentype.js`). Tout le reste vit dans le renderer, donc dans le bundle.
+
+### Ce qui est vérifié, et ce qui ne l'est pas
+
+Le paquet **Linux** a été construit et **lancé** : même rendu, mêmes 385 appels
+de dessin, même palette, depuis l'archive asar. La collecte de fichiers,
+l'embarquement du workspace et l'`asarUnpack` sont donc corrects.
+
+La cible **Windows** s'arrête sur `spawn wine ENOENT` depuis Linux : graver les
+métadonnées et l'icône d'un `.exe` demande wine. Ce dernier maillon ne peut se
+vérifier que sur une vraie machine Windows.
+
+Il manque aussi une **icône** : `directories.buildResources` pointe sur un
+dossier `build/` qui n'existe pas, donc l'installeur et l'exe porteraient le
+logo Electron générique.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
@@ -949,7 +1011,7 @@ jetable sans toucher au vrai.
 | 2.4 | Disposition (panneaux, inspecteur généré, palette virtualisée) | fait pour l'essentiel ; `Ctrl+K` et thème clair à venir |
 | 2.4b | Réglages (texte, densité, accent) + mode performance | **fait** — `settings.json` via l'adapter, `theme.js` testé, relevé par phase |
 | 2.5 | Viewport | maillage par chunk + AO **fait** ; atlas de textures et modèles non cubiques à venir |
-| 2.6 | Empaquetage | configuration electron-builder écrite, jamais exécutée sur Windows |
+| 2.6 | Empaquetage | configuration **corrigée et exercée** (paquet Linux construit et lancé) ; la cible Windows reste à faire tourner sur une vraie machine Windows — wine est requis pour graver l'exe depuis Linux |
 | 1.1 | Mesurer | **fait** — `bench/`, 16 scénarios, `RESULTS.md` |
 | 1.2 | Moteur rapide | **fait** — dépack de sections × 10,7, `RegionStore` (set-10M × 6,7), aperçu binaire et incrémental × 11,1 (−82 % sur le total), pool de fils × 2,4 sur `terrain`, plafonds réglables. Reste : aperçu découpé par chunk, `getBlock` sans allocation |
 | 1.3 | Entités | block entities **faites** (portées par les opérations et l'export décalé, biomes compris) ; entités mobiles (`entities/*.mca`) à venir |
