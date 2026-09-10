@@ -1,0 +1,14 @@
+node_modules/
+dist/
+release/
+out/
+*.log
+.DS_Store
+.env
+.env.local
+.claude/
+coverage/
+
+# Sorties de bench et données locales
+packages/we-engine/bench/out/
+apps/desktop/.vite/

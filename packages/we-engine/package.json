@@ -1,0 +1,24 @@
+{
+  "name": "@titi/we-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Moteur WorldEdit : lecture/écriture Anvil lossless, opérations sur volumes, formats d'échange",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./anvil": "./src/anvil/index.js",
+    "./worldedit": "./src/worldedit/index.js",
+    "./storage": "./src/storage/index.js",
+    "./staging": "./src/staging/index.js",
+    "./assets/*": "./assets/*"
+  },
+  "scripts": {
+    "test": "node --test 'test/*.test.js'",
+    "bench": "node bench/run.js"
+  },
+  "dependencies": {
+    "opentype.js": "^2.0.0",
+    "prismarine-nbt": "^2.8.0"
+  }
+}

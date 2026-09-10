@@ -1,0 +1,24 @@
+{
+  "name": "titi-worldedit",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Titi WorldEdit — éditeur de mondes Minecraft pour Windows (Electron)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "bench": "npm run bench --workspace @titi/we-engine",
+    "lint": "eslint packages apps"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.2.1",
+    "globals": "^17.5.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@titi/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Titi WorldEdit — application Windows (Electron + Vite + React)",
+  "scripts": {
+    "placeholder": "echo \"squelette : rempli à la phase 2\""
+  }
+}
