@@ -32,4 +32,19 @@ export default [
     files: ['**/test/**/*.js', '**/bench/**/*.js'],
     rules: { 'security/detect-non-literal-fs-filename': 'off' },
   },
+  {
+    // Le renderer tourne dans un navigateur, pas dans Node : il n'a ni `fs` ni
+    // `process`, mais il a `window`, `document` et `Worker`.
+    files: ['apps/desktop/src/renderer/**/*.{js,jsx}'],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.worker },
+      parserOptions: { ecmaFeatures: { jsx: true } },
+    },
+  },
+  {
+    // Le preload est en CommonJS — un preload en `sandbox: true` ne charge pas
+    // de modules ES — et voit un `process` restreint.
+    files: ['**/preload/**/*.cjs'],
+    languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
+  },
 ];

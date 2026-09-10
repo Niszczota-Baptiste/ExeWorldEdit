@@ -9,6 +9,11 @@ différemment, et pourquoi.
 
 ---
 
+![Le viewport](images/viewport.png)
+
+*Capture réelle de l'application : un build de 850 000 blocs généré par le
+moteur lui-même (`npm run demo`), maillé par chunk avec occlusion ambiante.*
+
 ## Où vit quoi
 
 ```
@@ -19,10 +24,32 @@ ExeWorldEdit/
 │  ├─ src/storage/         StorageAdapter + implémentation fichiers
 │  ├─ src/staging/         orchestration non destructive
 │  ├─ assets/fonts/        Unifont (rendu de texte sans police système)
-│  ├─ test/                128 tests
+│  ├─ test/                129 tests
 │  └─ bench/               mesures de performance (phase 1.1)
-└─ apps/desktop/           l'application Electron (phase 2)
+└─ apps/desktop/
+   ├─ src/main/            processus principal : fenêtre, protocole app://, IPC
+   ├─ src/preload/         pont d'API (CommonJS — obligatoire en sandbox)
+   ├─ src/engine/          le moteur dans son utilityProcess
+   ├─ src/renderer/        React + three.js
+   ├─ assets/fonts/        Pretendard (latin + hangeul, OFL)
+   ├─ test/                14 tests du mailleur
+   └─ scripts/make-demo.js build de démonstration, via le vrai moteur
 ```
+
+## Les trois processus
+
+| | Rôle | Ce qu'il n'a PAS le droit de faire |
+|---|---|---|
+| **Principal** | Fenêtre, dialogues système, protocole `app://`, relais IPC | Calculer quoi que ce soit sur un build |
+| **Moteur** (`utilityProcess`) | Source de vérité : seul à lire et écrire les régions | Parler à l'utilisateur, choisir un chemin de fichier |
+| **Renderer** | Interface et viewport | Toucher au disque, invoquer autre chose que la liste blanche du preload |
+
+Le renderer tourne en `contextIsolation: true`, `nodeIntegration: false`,
+`sandbox: true`. Il ne dispose que des méthodes énumérées dans
+`src/preload/index.cjs` : compromis par une dépendance, il ne peut rien faire
+d'autre. Une politique de sécurité de contenu interdit en plus toute ressource
+qui ne vient pas de `app://` — aucun CDN, aucune police distante, aucune requête
+réseau.
 
 `titisite` n'est **pas** modifié par ce dépôt. Le site continue de tourner sur sa
 propre copie du moteur. Les deux vont donc diverger dès la phase 1 — c'est un
@@ -160,6 +187,34 @@ Inchangé depuis le site, et c'est l'invariant central :
   `getBlock` alloue un objet par appel. Phase 1.2.
 - **Un seul fil d'exécution.** Pas de pool de workers. Phase 1.2.
 
+### Ce que le viewport ne fait pas encore
+
+- **Pas de textures** : chaque bloc est teinté d'une couleur unie. La base vient
+  des vraies couleurs de carte du jeu, exportées par le moteur
+  (`flatBlockColors`, ~60 blocs) ; le reste est complété à la main, et un bloc
+  inconnu reçoit une teinte dérivée de son nom, stable mais arbitraire. L'atlas
+  arrive en phase 2.5.
+- **Pas de modèles non cubiques** : escaliers, dalles et quarts de bloc
+  `minefield:*` sont rendus en cube plein. C'est la vraie limite du greedy
+  meshing, et le gros du travail de la 2.5.
+- **Pas de sélection à la souris ni de gizmos** : la sélection par défaut est
+  l'emprise du contenu, modifiable dans l'inspecteur seulement.
+- **Pas de palette de commandes** (`Ctrl+K`), pas de thème clair, pas d'onglets
+  multiples réellement ouvrables.
+
+### Mesurer le viewport honnêtement
+
+Les captures et les chiffres de cette documentation sont produits sous
+**xvfb + SwiftShader**, c'est-à-dire un rendu 100 % logiciel sur une machine
+sans carte graphique. Les 8 images par seconde qu'affiche la barre d'état dans
+ces conditions ne disent RIEN des performances réelles : elles mesurent un
+rasteriseur logiciel, pas le viewport. Le seul chiffre transposable de ces
+captures est le nombre d'appels de dessin (385 pour 850 000 blocs, soit un par
+chunk), qui est une propriété du maillage et pas du matériel.
+
+La cible de 60 images par seconde sur 20 M de blocs se vérifiera sur une vraie
+machine, à la phase 2.7.
+
 ### Piste principale pour la phase 1.1
 
 `decodeChunk` passe par `prismarine-nbt` (`nbt.parse` + `nbt.simplify`), une
@@ -191,10 +246,22 @@ d'autre dans le moteur n'a besoin de bouger.
 
 ```bash
 npm install
-npm test          # tous les paquets
+npm test                              # tous les paquets
 npm run lint
-npm run bench     # phase 1.1
+
+# Application
+npm run dev      --workspace @titi/desktop   # Vite + Electron en parallèle
+npm run start    --workspace @titi/desktop   # build puis lancement
+npm run dist     --workspace @titi/desktop   # installeur NSIS + portable (Windows)
+npm run demo     --workspace @titi/desktop -- <dossier-de-données>
+
+# Capture du rendu, y compris sans écran (rendu logiciel)
+TITI_SCREENSHOT=/chemin/capture.png xvfb-run -a npx electron .
 ```
+
+`TITI_DATA_ROOT` déplace l'espace de données (par défaut
+`%APPDATA%/TitiWorldEdit`), ce qui permet de travailler sur un jeu de projets
+jetable sans toucher au vrai.
 
 ---
 
@@ -203,12 +270,22 @@ npm run bench     # phase 1.1
 | Phase | Sujet | État |
 |---|---|---|
 | 0 | Extraire le moteur en package partagé | **fait** |
-| 2.1–2.2 | Socle Electron, ouverture, export | à venir |
+| 2.1 | Socle Electron (3 processus, `app://`, IPC en liste blanche) | **fait** |
+| 2.2 | Ouverture et export | ouverture `.mca`/`.zip` et export `.mca` faits ; `.schem`, `.litematic`, glisser-déposer, verrou `session.lock` et sauvegarde horodatée à venir |
+| 2.3 | Direction visuelle (jetons, Pretendard, roue d'outils) | **fait** |
+| 2.4 | Disposition (panneaux, inspecteur généré, palette virtualisée) | fait pour l'essentiel ; `Ctrl+K` et thème clair à venir |
+| 2.5 | Viewport | maillage par chunk + AO **fait** ; atlas de textures et modèles non cubiques à venir |
+| 2.6 | Empaquetage | configuration electron-builder écrite, jamais exécutée sur Windows |
 | 1 | Moteur rapide et entités | à venir |
-| 2.3–2.5 | Direction visuelle, disposition, viewport | à venir |
 | 3 | Brushs | à venir |
 | 4 | Tracés, PNJ, dispersion | à venir |
 | 5 | Outils de génération | à venir |
+
+![La roue d'outils](images/roue-outils.png)
+
+*L'élément signature : maintenir `Espace` au-dessus du viewport ouvre la roue,
+la direction du curseur choisit l'outil, relâcher valide. On change d'outil sans
+quitter le build des yeux.*
 
 L'ordre choisi n'est pas celui du numérotage : le socle Electron passe **avant**
 l'optimisation du moteur, pour que le bench de la phase 1 mesure les vrais

@@ -10,7 +10,10 @@ sur le moteur WorldEdit du site `titisite`. Monorepo npm workspaces :
 
 - `packages/we-engine` — le moteur. Aucune dépendance à un serveur, une base de
   données ou un navigateur. C'est là que vit tout le savoir sur le format Anvil.
-- `apps/desktop` — l'application Electron (phase 2, encore un squelette).
+- `apps/desktop` — l'application Electron. Trois processus : **principal**
+  (fenêtre, dialogues, protocole `app://`), **moteur** (`utilityProcess`, seul
+  à toucher aux fichiers de région), **renderer** (React + three.js, en
+  sandbox, sans accès disque).
 
 Cible : Minecraft **vanilla 1.18** avec les blocs custom `minefield:*`. Gros
 builds pour le serveur Minefield — murailles, arènes, villes, terrains.
@@ -29,6 +32,13 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 4. **Toute génération aléatoire prend une seed** et est rejouable. Les fonctions
    qui tirent au sort acceptent un générateur injectable (voir `weightedPicker`).
 5. **Aucune écriture dans une save sans sauvegarde préalable.**
+6. **Le renderer ne touche jamais au disque.** Il passe par la liste blanche du
+   preload (`apps/desktop/src/preload/index.cjs`) et rien d'autre. Ajouter une
+   capacité veut dire l'ajouter à cette liste — délibérément, pas par accident.
+7. **Le moteur ne parle jamais à l'utilisateur.** Il rend un fichier prêt à
+   écrire ; c'est le processus principal qui ouvre le dialogue et choisit le
+   chemin. Un moteur qui ouvre des fenêtres est un moteur qu'on ne peut plus
+   tester ni réutiliser.
 
 ## Conventions
 
@@ -52,10 +62,19 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (128 tests aujourd'hui)
+npm test          # tous les paquets (143 tests aujourd'hui)
 npm run lint
-npm run bench     # phase 1.1
+
+npm run dev   --workspace @titi/desktop   # Vite + Electron
+npm run start --workspace @titi/desktop   # build puis lancement
+npm run dist  --workspace @titi/desktop   # installeur Windows
+npm run demo  --workspace @titi/desktop -- <dossier>   # build de démonstration
 ```
+
+Sans écran (session distante, intégration continue) :
+`TITI_SCREENSHOT=/tmp/x.png xvfb-run -a npx electron .` rend la fenêtre en
+logiciel et écrit un PNG. Les images par seconde mesurées ainsi ne valent rien —
+c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 
 ## Où ajouter quoi
 
@@ -66,6 +85,9 @@ npm run bench     # phase 1.1
 | Un format d'échange | `src/worldedit/schematicFormats.js` + un test de round-trip |
 | Une chose qui dépend d'où vivent les données | une méthode du `StorageAdapter` + son cas dans la suite de contrat (`test/storage.test.js`) |
 | Un plafond réglable | `DEFAULT_LIMITS` (`src/staging/geometry.js`), jamais une variable d'environnement |
+| Une capacité pour le renderer | la méthode dans `apps/desktop/src/engine/index.js`, puis son nom dans `ENGINE_METHODS` du preload |
+| Un outil dans l'interface | `TOOLS` et `TOOL_OPS` (`apps/desktop/src/renderer/store.js`) — l'inspecteur génère ses champs depuis le descripteur du moteur, il n'y a pas de formulaire à écrire |
+| Une couleur de bloc pour le viewport | `EXTRA` dans `apps/desktop/src/renderer/viewport/blockColors.js` (en attendant l'atlas) |
 
 ## Ce qui n'est pas encore là
 
@@ -91,3 +113,16 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
 - **Régénérer un aperçu sans troncature.** Sur le site, annuler une opération sur
   un très gros build levait `too_many_blocks` alors que l'annulation avait
   réussi. Tout ce qui dérive un aperçu doit tronquer et le signaler.
+- **`import * as Icons from 'lucide-react'`** embarque les ~1500 icônes de la
+  bibliothèque : 1 Mo de bundle pour en afficher onze. Passer par
+  `renderer/shell/icons.js`, qui les réexporte nommément.
+- **Deux racines derrière le même préfixe `app://`.** Vite écrit déjà le bundle
+  dans `dist/renderer/assets` ; servir aussi les polices sous `assets` faisait
+  répondre 404 aux scripts de l'application. Les assets embarqués sont sous
+  `res/`.
+- **Couleurs de sommet en sRGB.** three.js les traite comme linéaires et
+  réencode à l'affichage : envoyer du sRGB tel quel fait passer deux fois dans
+  l'encodage et délave tout le build. La conversion est dans `buildTables`.
+- **Un panneau redimensionnable n'est pas un conteneur flex.** `flex: 1` sur le
+  viewport ne lui donnait aucune hauteur, et le canvas se rendait en 1175×0 —
+  sans la moindre erreur. `height: 100%`.

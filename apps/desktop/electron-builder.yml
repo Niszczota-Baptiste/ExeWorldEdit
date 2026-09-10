@@ -1,0 +1,55 @@
+appId: fr.niszczota.titiworldedit
+productName: Titi WorldEdit
+copyright: © Baptiste Niszczota
+
+directories:
+  output: release
+  buildResources: build
+
+# Le renderer est bundlé par Vite ; le processus principal, le preload et le
+# moteur partent en source (ils tournent dans Node, pas dans un navigateur).
+files:
+  - src/main/**
+  - src/preload/**
+  - src/engine/**
+  - dist/renderer/**
+  - assets/**
+  - package.json
+
+# Le paquet du moteur est un workspace : electron-builder doit l'embarquer.
+extraMetadata:
+  main: src/main/index.js
+
+asar: true
+asarUnpack:
+  # `sharp` charge des binaires natifs et ne peut pas être lu depuis l'archive.
+  # `@img/**` est indispensable en plus de `sharp/**` : depuis la version 0.33,
+  # les binaires vivent dans des paquets frères `@img/sharp-*`, et les oublier
+  # est LA panne classique d'un premier empaquetage.
+  - '**/node_modules/sharp/**'
+  - '**/node_modules/@img/**'
+  # La police est lue par `fs.readFileSync` dans le moteur de rendu de texte.
+  - '**/node_modules/@titi/we-engine/assets/**'
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  # Pas de signature pour l'instant : Windows affichera un avertissement
+  # SmartScreen au premier lancement. À traiter quand un certificat existera.
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Titi WorldEdit
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+
+publish: null

@@ -1,0 +1,113 @@
+/* Jetons de l'atelier.
+   Le viewport est le héros : tout le reste est calme, dense et discret. */
+
+@font-face {
+  font-family: 'Pretendard';
+  src: url('app://titi/res/fonts/Pretendard-Regular.woff2') format('woff2');
+  font-weight: 400; font-display: swap; font-style: normal;
+}
+@font-face {
+  font-family: 'Pretendard';
+  src: url('app://titi/res/fonts/Pretendard-Medium.woff2') format('woff2');
+  font-weight: 500; font-display: swap; font-style: normal;
+}
+@font-face {
+  font-family: 'Pretendard';
+  src: url('app://titi/res/fonts/Pretendard-SemiBold.woff2') format('woff2');
+  font-weight: 600; font-display: swap; font-style: normal;
+}
+@font-face {
+  font-family: 'Pretendard';
+  src: url('app://titi/res/fonts/Pretendard-Bold.woff2') format('woff2');
+  font-weight: 700; font-display: swap; font-style: normal;
+}
+
+:root {
+  /* Surfaces */
+  --shell: #1E2329;
+  --panel: #272D35;
+  --panel-raised: #2E353F;
+  --sunken: #21262D;
+  --line: #3A424D;
+  --line-soft: #333A44;
+
+  /* Texte */
+  --text: #E6E9ED;
+  --text-dim: #9AA4B2;
+  --text-faint: #6E7885;
+
+  /* Intentions */
+  --accent: #7FB8A4;         /* céladon — outil actif, focus */
+  --accent-dim: #5E8D7E;
+  --accent-wash: rgba(127, 184, 164, 0.14);
+  --select: #E3B64F;         /* or — sélection et gizmos */
+  --select-wash: rgba(227, 182, 79, 0.16);
+  --danger: #E0685E;
+
+  /* Rayons : la hiérarchie se lit à l'arrondi.
+     Champs < panneaux < fenêtres flottantes. */
+  --r-field: 4px;
+  --r-panel: 7px;
+  --r-float: 12px;
+  --r-pill: 999px;
+
+  /* Échelle typographique — quatre tailles, pas une de plus */
+  --t-micro: 12px;
+  --t-small: 13px;
+  --t-body: 15px;
+  --t-title: 18px;
+
+  --titlebar-h: 38px;
+  --statusbar-h: 30px;
+  --rail-w: 52px;
+
+  /* Mouvement : seulement en réponse à une action */
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --fast: 120ms;
+  --slow: 200ms;
+
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --fast: 0ms; --slow: 0ms; }
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--shell);
+  color: var(--text);
+  font-family: 'Pretendard', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: var(--t-small);
+  line-height: 1.45;
+  /* Chiffres tabulaires partout : des coordonnées qui dansent pendant qu'on
+     survole le build sont illisibles. */
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* Le focus clavier doit toujours se voir — c'est le plancher, pas une option. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--r-field);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: var(--r-pill);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: #4A5460; background-clip: content-box; }
