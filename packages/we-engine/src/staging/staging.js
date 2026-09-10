@@ -23,6 +23,7 @@ import {
 } from './geometry.js';
 import { blankRegions, regionsToDownload } from './blank.js';
 import { splicePreview } from './preview.js';
+import { encodePreview, decodePreview, isBinaryPreview } from './previewCodec.js';
 
 // Orchestration NON DESTRUCTIVE des opérations WorldEdit.
 //
@@ -92,7 +93,11 @@ export function createStaging(adapter, options = {}) {
   const regionsDir = (id) => path.join(dirFor(id), 'regions');
   const undoDir = (id) => path.join(dirFor(id), 'undo');
   const redoDir = (id) => path.join(dirFor(id), 'redo');
-  const previewPath = (id) => path.join(dirFor(id), 'preview.json.gz');
+  const previewPath = (id) => path.join(dirFor(id), 'preview.bin');
+  // L'aperçu était du JSON gzippé jusqu'à la phase 1.2. On continue de lire
+  // l'ancien fichier — un projet ouvert avant la mise à jour ne doit pas perdre
+  // son aperçu — mais on n'en écrit plus.
+  const legacyPreviewPath = (id) => path.join(dirFor(id), 'preview.json.gz');
 
   const editLimits = (project) => buildLimits(project, limits);
   const checkSelection = (sel, bbox, maxVolume = limits.maxSelectionVolume) => {
@@ -210,7 +215,6 @@ export function createStaging(adapter, options = {}) {
   // compresser 9,7 Mo d'aperçu coûtait 457 ms au défaut contre 67 ms au niveau 1,
   // pour 350 ko de plus. C'est un FICHIER DE CACHE local, régénérable à volonté —
   // payer 390 ms par opération pour l'alléger d'un tiers n'a aucun sens.
-  const PREVIEW_GZIP = { level: 1 };
 
   // Dernier aperçu écrit, gardé en mémoire. Le recollage a besoin du précédent
   // à chaque opération, et le relire coûtait 209 ms (48 de gunzip, 161 de
@@ -225,7 +229,9 @@ export function createStaging(adapter, options = {}) {
   let previewCache = null; // { id, sparse }
 
   function writePreview(id, sparse) {
-    fs.writeFileSync(previewPath(id), zlib.gzipSync(Buffer.from(JSON.stringify(sparse)), PREVIEW_GZIP));
+    fs.writeFileSync(previewPath(id), encodePreview(sparse));
+    // Un ancien aperçu resté à côté ferait deux sources pour la même chose.
+    try { fs.rmSync(legacyPreviewPath(id), { force: true }); } catch { /* déjà parti */ }
     previewCache = { id, sparse };
   }
 
@@ -292,11 +298,13 @@ export function createStaging(adapter, options = {}) {
 
   // ── API ───────────────────────────────────────────────────────────────────
 
-  const hasPendingEdits = (id) => fs.existsSync(previewPath(id));
+  const hasPendingEdits = (id) => previewFilePath(id) !== null;
 
   function previewFilePath(id) {
     const p = previewPath(id);
-    return fs.existsSync(p) ? p : null;
+    if (fs.existsSync(p)) return p;
+    const legacy = legacyPreviewPath(id);
+    return fs.existsSync(legacy) ? legacy : null;
   }
 
   function readPreview(id) {
@@ -306,7 +314,12 @@ export function createStaging(adapter, options = {}) {
       return null;
     }
     if (previewCache?.id === id) return previewCache.sparse;
-    const sparse = JSON.parse(zlib.gunzipSync(fs.readFileSync(p)).toString('utf8'));
+    const raw = fs.readFileSync(p);
+    // Le format se reconnaît à ses octets, pas à son nom : un aperçu écrit par
+    // une version antérieure se relit, la prochaine écriture le convertit.
+    const sparse = isBinaryPreview(raw)
+      ? decodePreview(raw)
+      : JSON.parse(zlib.gunzipSync(raw).toString('utf8'));
     previewCache = { id, sparse };
     return sparse;
   }

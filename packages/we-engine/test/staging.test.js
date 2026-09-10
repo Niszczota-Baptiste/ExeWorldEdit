@@ -818,3 +818,54 @@ test('un plafond réglé survit et s’applique au staging suivant', async () =>
   const relance = createStaging(adapter, normalizeLimits(adapter.readSettings().limits));
   assert.equal(relance.limits.maxUndo, 7);
 });
+
+// ── Format d'aperçu ─────────────────────────────────────────────────────────
+
+test('un aperçu JSON gzippé d’une version antérieure se relit encore', async () => {
+  // Chemin de MISE À JOUR : un projet ouvert avant la phase 1.2 a un
+  // `preview.json.gz` sur disque. Ne plus savoir le lire lui ferait perdre son
+  // aperçu et son drapeau « modifié », en silence.
+  const zlib = await import('node:zlib');
+  const { createStaging } = await import('../src/staging/index.js');
+  const { adapter, staging, project } = makeProject();
+
+  await staging.applyOperation({
+    project: project(), operation: 'set', params: { block: { name: OAK } },
+    selection: ONE(1, 1, 1), actor: 't',
+  });
+  const attendu = staging.readPreview('p1');
+
+  // On remet l'ancien format à la place du nouveau.
+  const dir = path.dirname(staging.stagingRegionsDir('p1'));
+  fs.writeFileSync(path.join(dir, 'preview.json.gz'), zlib.gzipSync(Buffer.from(JSON.stringify(attendu))));
+  fs.rmSync(path.join(dir, 'preview.bin'), { force: true });
+
+  // Un staging NEUF sur le même dossier : pas de cache mémoire, donc il lit
+  // vraiment le disque.
+  const relu = createStaging(adapter);
+  assert.equal(relu.hasPendingEdits('p1'), true, '« modifié » doit rester vrai');
+  const p = relu.readPreview('p1');
+  assert.equal(p.count, attendu.count);
+  assert.deepEqual(p.blocks, attendu.blocks);
+  assert.deepEqual(p.palette, attendu.palette);
+});
+
+test('la première écriture convertit l’ancien aperçu et le retire', async () => {
+  const zlib = await import('node:zlib');
+  const { createStaging } = await import('../src/staging/index.js');
+  const { adapter, staging, project } = makeProject();
+
+  await staging.applyOperation({
+    project: project(), operation: 'set', params: { block: { name: OAK } },
+    selection: ONE(1, 1, 1), actor: 't',
+  });
+  const dir = path.dirname(staging.stagingRegionsDir('p1'));
+  fs.writeFileSync(path.join(dir, 'preview.json.gz'), zlib.gzipSync(Buffer.from(JSON.stringify(staging.readPreview('p1')))));
+
+  const frais = createStaging(adapter);
+  await frais.regenPreview(project());
+
+  assert.equal(fs.existsSync(path.join(dir, 'preview.bin')), true);
+  assert.equal(fs.existsSync(path.join(dir, 'preview.json.gz')), false,
+    'deux fichiers pour la même chose finiraient par diverger');
+});

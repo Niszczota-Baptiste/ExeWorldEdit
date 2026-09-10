@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (239 tests aujourd'hui : 214 moteur, 25 desktop)
+npm test          # tous les paquets (250 tests aujourd'hui : 225 moteur, 25 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -97,6 +97,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Une opération WorldEdit | `packages/we-engine/src/worldedit/transform.js` + son entrée dans `OPS` (`src/staging/staging.js`) + son descripteur dans `operations.js` + ses tests. Elle DOIT rendre des `bounds` couvrant tout ce qu'elle écrit : l'instantané d'annulation ET l'aperçu incrémental s'y fient |
 | Une propriété d'état de bloc à transformer | `src/worldedit/blockstates.js` + une assertion par propriété dans `test/worldedit.test.js` |
 | Un format d'échange | `src/worldedit/schematicFormats.js` + un test de round-trip |
+| Un champ dans l'aperçu | `src/staging/previewCodec.js` (en-tête JSON) + son cas dans `test/preview-codec.test.js` ; le corps binaire ne porte que les blocs |
 | Une chose qui dépend d'où vivent les données | une méthode du `StorageAdapter` + son cas dans la suite de contrat (`test/storage.test.js`) |
 | Un plafond réglable | `DEFAULT_LIMITS` + son entrée dans `LIMIT_RANGES` (`src/staging/geometry.js`), jamais une variable d'environnement. L'interface génère son champ depuis les bornes, il n'y a rien à écrire côté renderer |
 | Une capacité pour le renderer | la méthode dans `apps/desktop/src/engine/index.js`, puis son nom dans `ENGINE_METHODS` du preload |
@@ -164,6 +165,11 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   donnée qui arrive plus tard va dans un effet.
 - **Une grille en `1fr` s'étire.** La carte des régions doit garder ses
   proportions de monde : colonnes à taille fixe, jamais `1fr`.
+- **Sérialiser un cache en JSON.** L'aperçu passait ~330 ms par opération dans
+  `stringify`/`parse`/gzip, quel que soit le nombre de blocs changés. En binaire
+  non compressé : ~30 ms, pour 5,1 Mo au lieu de 2,0. Un cache s'optimise pour
+  le temps. Corollaire : un format binaire se reconnaît à ses OCTETS, jamais à
+  son nom de fichier — c'est ce qui permet de relire l'ancien.
 - **Compresser un fichier de CACHE au niveau par défaut.** L'aperçu passait
   457 ms dans gzip pour gagner 350 ko sur un fichier qu'on régénère à volonté.
   Niveau 1 : 67 ms. Un cache s'optimise pour le temps, pas pour la place.

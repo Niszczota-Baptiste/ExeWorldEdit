@@ -513,6 +513,64 @@ toucher `transform.js` entier — un autre chantier.
 
 ---
 
+## Le format de l'aperçu
+
+L'aperçu était du JSON gzippé. Mesuré sur 850 000 blocs, à **chaque** opération :
+
+| | avant |
+|---|---|
+| `JSON.parse` (relecture) | 161 ms |
+| gzip (écriture) | 76 ms |
+| gunzip (relecture) | 48 ms |
+| `JSON.stringify` (écriture) | 46 ms |
+
+Soit ~330 ms de sérialisation par commande, quel que soit le nombre de blocs
+réellement changés — un plancher que le recollage incrémental ne pouvait pas
+franchir.
+
+`previewCodec.js` écrit les mêmes données en binaire, **sans compression** :
+~10 ms à l'écriture, ~20 ms à la relecture, pour 5,1 Mo au lieu de 2,0 Mo.
+C'est le même arbitrage que le niveau de gzip qui l'a précédé : un aperçu est
+un fichier de cache, régénérable à volonté et jamais partagé. On l'optimise
+pour le temps, pas pour la place.
+
+### Ce que le format garantit
+
+- **Deux modes.** `linear` (6 o/bloc) écrit un index de case en Uint32 ;
+  utilisable tant que le volume de l'emprise tient dans 32 bits, soit une boîte
+  de 1625³. Au-delà, repli `triple` (14 o/bloc) avec x, y, z séparés. Sans ce
+  repli, une très grande emprise ferait déborder l'index en silence.
+- **Palette large.** Au-delà de 65 535 entrées, les index passent en Uint32 :
+  tronquer en Uint16 transformerait un bloc en un autre, sans erreur.
+- **Corps aligné sur 4 octets.** Une vue `Uint32Array` sur un décalage non
+  aligné lève ; le bourrage de l'en-tête est le seul moyen de le garantir.
+- **Le format se reconnaît à ses octets, pas à son nom.** Un projet ouvert avant
+  la phase 1.2 a un `preview.json.gz` : il se relit encore, et la première
+  écriture le convertit puis le retire. Deux fichiers pour la même chose
+  finiraient par diverger — un test l'exige.
+
+### Où en est le moteur
+
+Cumul des douze opérations du build de démonstration, depuis le début de la
+phase 1.2 :
+
+| phase | départ | aujourd'hui | |
+|---|---|---|---|
+| lecture des régions | 732 ms | 693 ms | −5 % |
+| calcul | 1 233 ms | 337 ms | −73 % |
+| écriture | 427 ms | 365 ms | −15 % |
+| **aperçu** | **10 879 ms** | **976 ms** | **× 11,1** |
+| **total** | **13 276 ms** | **2 372 ms** | **−82 %** |
+
+L'aperçu retombe de 82 % à 41 % du temps moteur. Les petites opérations, celles
+qu'on enchaîne, passent de ~815 ms à ~90 ms.
+
+Le relevé désigne maintenant une autre cible : **la lecture des régions est
+devenue le premier poste** (29 % du cumul). C'est le décodage Anvil, déjà
+optimisé × 4,2 à la phase 1.2 — la suite est le parallélisme.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
@@ -587,9 +645,9 @@ mélangé passerait les tests de rejouabilité et produirait quand même des ban
   chemin chaud est traité (voir « Le chemin chaud du `RegionStore` »).
 - **Un seul fil d'exécution.** Pas de pool de workers. Phase 1.2.
 - **L'aperçu se resérialise en entier** à chaque opération, même pour un bloc
-  changé : `JSON.stringify` + gzip forment un plancher d'environ 120 ms. Le
-  parcours, lui, est devenu incrémental. Descendre plus bas demande un format
-  binaire ou découpé par chunk, donc de toucher aussi le renderer. Phase 1.2.
+  changé. Le format binaire a ramené ce plancher de ~330 ms à ~30 ms ; le
+  supprimer demanderait un aperçu découpé par chunk, donc de toucher aussi le
+  renderer.
 - **Pas de textures ni de modèles non cubiques** dans le viewport (phase 2.5),
   détaillé plus bas.
 
