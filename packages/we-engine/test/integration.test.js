@@ -5,9 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { FsAdapter } from '../src/storage/index.js';
 import { createStaging, blankRegions, schematicToRegions, volumeToSchematic } from '../src/staging/index.js';
-import { readSaveInfo, applyToWorld } from '../src/world/index.js';
+import { readSaveInfo, applyToWorld, worldOverview, regionsForBBox, readRegions } from '../src/world/index.js';
 import { RegionStore } from '../src/worldedit/regionStore.js';
 import { schematicToSponge } from '../src/worldedit/schematicFormats.js';
+import { buildRegion } from './fixtures/region.js';
 
 // Le parcours complet, de bout en bout : ouvrir une vraie save, l'éditer,
 // réécrire dedans, en ressortir un schematic et le rouvrir.
@@ -130,4 +131,71 @@ test('parcours complet : sortir un schematic d’une save et le rouvrir', async 
   assert.deepEqual(rouvert.origin, { x: 4, y: 4, z: 4 });
   assert.deepEqual(rouvert.sparse.min, { x: 4, y: 4, z: 4 });
   assert.equal(rouvert.sparse.palette[rouvert.sparse.blocks[3]].name, STONE);
+});
+
+test('parcours complet : n’ouvrir qu’une zone d’un monde qui en compte beaucoup', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'we-integration-'));
+  roots.push(tmp);
+  const save = path.join(tmp, 'Grand Monde');
+  fs.mkdirSync(path.join(save, 'region'), { recursive: true });
+  fs.writeFileSync(path.join(save, 'level.dat'), Buffer.from([0x1f, 0x8b]));
+
+  // 25 régions : c'est la situation normale d'un monde joué, et tout charger
+  // serait exactement le défaut qu'on corrige.
+  const explored = [];
+  for (let rz = -2; rz <= 2; rz++) {
+    for (let rx = -2; rx <= 2; rx++) {
+      explored.push([rx, rz]);
+      fs.writeFileSync(
+        path.join(save, 'region', `r.${rx}.${rz}.mca`),
+        buildRegion([{ x: 0, y: 0, z: 0, Name: STONE }]),
+      );
+    }
+  }
+
+  const info = readSaveInfo(save);
+  const map = worldOverview(info);
+  assert.equal(map.count, 25);
+  assert.deepEqual(map.bounds, { minX: -2, maxX: 2, minZ: -2, maxZ: 2 });
+
+  // La zone demandée : autour de l'origine, 600 blocs de côté. Elle recoupe
+  // quatre régions — pas vingt-cinq.
+  const area = { min: { x: -100, z: -100 }, max: { x: 600, z: 600 } };
+  const wanted = regionsForBBox(area);
+  assert.deepEqual(
+    wanted.map((r) => `${r.regionX},${r.regionZ}`).sort(),
+    ['-1,-1', '-1,0', '-1,1', '0,-1', '0,0', '0,1', '1,-1', '1,0', '1,1'].filter((k) => {
+      const [x, z] = k.split(',').map(Number);
+      return x >= -1 && x <= 1 && z >= -1 && z <= 1;
+    }).sort(),
+  );
+
+  const adapter = new FsAdapter({ root: path.join(tmp, 'donnees') });
+  const staging = createStaging(adapter);
+  adapter.saveProject({
+    id: 'w1', name: info.name,
+    min: { x: 0, y: 0, z: 0 }, size: { x: 1, y: 1, z: 1 },
+    world: { path: info.root, kind: info.kind },
+  });
+  staging.seedRegions('w1', readRegions(info, wanted));
+
+  const loaded = staging.listRegionFiles('w1');
+  assert.equal(loaded.length, 9, 'seules les régions de la zone sont matérialisées');
+  assert.equal(fs.readdirSync(info.regionDir).length, 25, 'et la save, elle, garde ses 25');
+
+  // Étendre ensuite : les régions déjà là ne sont pas rechargées.
+  // La zone X 600→1100, Z 0→500 recoupe r.1.0 et r.2.0 ; la première est déjà
+  // chargée, donc une seule s'ajoute.
+  const dejaLa = new Set(loaded.map((f) => `${f.regionX},${f.regionZ}`));
+  const viseesParLExtension = regionsForBBox({ min: { x: 600, z: 0 }, max: { x: 1100, z: 500 } });
+  assert.deepEqual(
+    viseesParLExtension.map((r) => `${r.regionX},${r.regionZ}`).sort(),
+    ['1,0', '2,0'],
+  );
+
+  const nouvelles = viseesParLExtension.filter((r) => !dejaLa.has(`${r.regionX},${r.regionZ}`));
+  assert.deepEqual(nouvelles.map((r) => `${r.regionX},${r.regionZ}`), ['2,0'], 'r.1.0 était déjà là');
+
+  staging.seedRegions('w1', readRegions(info, nouvelles));
+  assert.equal(staging.listRegionFiles('w1').length, 10, 'une région ajoutée, aucune rechargée');
 });

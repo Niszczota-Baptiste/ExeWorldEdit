@@ -81,7 +81,33 @@ function createWindow() {
   if (isDev) win.loadURL(process.env.TITI_DEV_SERVER);
   else win.loadURL(`app://titi/index.html${process.env.TITI_DIAG ? '#diag' : ''}`);
 
+  // Chemin passé au lancement : « ouvrir avec », un fichier lâché sur l'icône,
+  // une association de fichiers, ou `titi-worldedit.exe "C:\...\saves\Monde"`.
+  // Il suit exactement le même chemin qu'un glisser-déposer.
+  const startupPath = pendingOpen();
+  if (startupPath) {
+    win.webContents.once('did-finish-load', () => {
+      win.webContents.send('engine:event', { event: 'open-path', path: startupPath });
+    });
+  }
+
   return win;
+}
+
+/**
+ * Le chemin à ouvrir au démarrage, s'il y en a un. Electron passe ses propres
+ * options dans argv : on ne retient que le premier argument qui EXISTE
+ * réellement sur le disque, ce qui écarte les drapeaux sans les lister.
+ */
+function pendingOpen() {
+  if (process.env.TITI_OPEN) return process.env.TITI_OPEN;
+  const args = process.argv.slice(app.isPackaged ? 1 : 2);
+  for (const arg of args) {
+    if (arg.startsWith('-')) continue;
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- argument de ligne de commande, seulement testé
+    if (fs.existsSync(arg)) return arg;
+  }
+  return null;
 }
 
 app.whenReady().then(async () => {
@@ -118,7 +144,8 @@ app.whenReady().then(async () => {
       return engine.call('openFile', { filePath: target });
     }
     // Ni l'un ni l'autre : c'est probablement un dossier (save ou region/).
-    return engine.call('openWorld', { dirPath: target });
+    // Il rend sa carte, pas un projet — voir `shell:openWorldFolder`.
+    return engine.call('inspectWorldFolder', { dirPath: target });
   };
 
   ipcMain.handle('shell:openBuild', async () => {
@@ -136,13 +163,19 @@ app.whenReady().then(async () => {
     return openAnyPath(res.filePaths[0]);
   });
 
+  /**
+   * Choisir un dossier de monde rend sa CARTE, pas un projet : une save peut
+   * peser des dizaines de gigaoctets, et l'ouvrir en entier n'aurait aucun sens.
+   * C'est le renderer qui montre la carte, laisse choisir une zone, puis appelle
+   * `openWorld` avec elle.
+   */
   ipcMain.handle('shell:openWorldFolder', async () => {
     const res = await dialog.showOpenDialog(win, {
       title: 'Ouvrir un dossier de save ou un dossier region/',
       properties: ['openDirectory'],
     });
     if (res.canceled || !res.filePaths[0]) return null;
-    return engine.call('openWorld', { dirPath: res.filePaths[0] });
+    return engine.call('inspectWorldFolder', { dirPath: res.filePaths[0] });
   });
 
   ipcMain.handle('shell:openPath', (_e, target) => openAnyPath(target));

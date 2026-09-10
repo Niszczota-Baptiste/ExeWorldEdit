@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { FsAdapter } from '@titi/we-engine/storage';
 import { createStaging, blankRegions } from '@titi/we-engine/staging';
-import { readSaveInfo } from '@titi/we-engine/world';
+import { readSaveInfo, worldOverview, readRegions } from '@titi/we-engine/world';
 import { RegionStore } from '@titi/we-engine/worldedit';
 
 const root = process.argv[2] || process.env.TITI_DATA_ROOT;
@@ -122,40 +122,63 @@ fs.mkdirSync(path.join(savePath, 'entities'), { recursive: true });
 fs.writeFileSync(path.join(savePath, 'level.dat'), Buffer.from([0x1f, 0x8b]));
 fs.writeFileSync(path.join(savePath, 'session.lock'), '☃');
 
-{
-  const regions = blankRegions({ origin: { x: 0, y: 60, z: 0 }, size: { x: 64, y: 1, z: 64 } });
+// Plusieurs régions dispersées, comme un monde réellement joué : des zones
+// explorées, des trous jamais générés. C'est ce qui donne au sélecteur de zone
+// quelque chose à montrer.
+const EXPLORED = [
+  [0, 0], [1, 0], [2, 0],
+  [0, 1], [1, 1], [2, 1], [3, 1],
+  [1, 2], [2, 2],
+  [-1, 0], [-1, 1],
+  [4, 3], [5, 3],
+];
+for (const [rx, rz] of EXPLORED) {
+  const originX = rx * 512;
+  const originZ = rz * 512;
+  const regions = blankRegions({ origin: { x: originX, y: 60, z: originZ }, size: { x: 512, y: 1, z: 512 } });
   const store = new RegionStore(regions);
-  const box = { min: { x: 0, y: 60, z: 0 }, max: { x: 63, y: 80, z: 63 } };
+  const box = { min: { x: originX, y: 60, z: originZ }, max: { x: originX + 511, y: 80, z: originZ + 511 } };
   await store.warmup(box);
-  for (let x = 0; x < 64; x++) {
-    for (let z = 0; z < 64; z++) {
-      store.setBlock(x, 62, z, { Name: 'minecraft:grass_block', Properties: null });
-      store.setBlock(x, 61, z, { Name: 'minecraft:dirt', Properties: null });
+  // Un damier grossier suffit : ce qui compte ici est la CARTE, pas le contenu.
+  for (let x = 0; x < 512; x += 8) {
+    for (let z = 0; z < 512; z += 8) {
+      store.setBlock(originX + x, 62, originZ + z, { Name: 'minecraft:grass_block', Properties: null });
     }
   }
   for (const [key, buf] of store.commit({ touchedOnly: false })) {
-    const [rx, rz] = key.split(',').map(Number);
-    fs.writeFileSync(path.join(savePath, 'region', `r.${rx}.${rz}.mca`), buf);
+    const [krx, krz] = key.split(',').map(Number);
+    fs.writeFileSync(path.join(savePath, 'region', `r.${krx}.${krz}.mca`), buf);
   }
 }
 
 const info = readSaveInfo(savePath);
+const map = worldOverview(info);
+console.log(`\nSave de démonstration : ${savePath}`);
+console.log(`  ${map.count} régions, ${(map.bytes / 1e6).toFixed(1)} Mo, emprise r.${map.bounds.minX}.${map.bounds.minZ} → r.${map.bounds.maxX}.${map.bounds.maxZ}`);
+console.log('  → « Ouvrir une save » dans l’application montre sa carte et laisse choisir la zone.');
+
+// Un projet déjà ouvert sur DEUX régions de cette save, pour que le chemin
+// « Appliquer au monde » soit essayable sans repasser par le sélecteur.
 const worldId = 'demo-save';
 adapter.removeProject(worldId);
 adapter.saveProject({
-  id: worldId, name: info.name,
-  min: { x: 0, y: 60, z: 0 }, size: { x: 64, y: 21, z: 64 },
+  id: worldId, name: `${info.name} (2 régions)`,
+  min: { x: 0, y: 60, z: 0 }, size: { x: 1, y: 1, z: 1 },
   world: { path: info.root, kind: info.kind },
 });
-staging.seedRegions(worldId, fs.readdirSync(info.regionDir)
-  .filter((f) => /^r\.-?\d+\.-?\d+\.mca$/.test(f))
-  .map((f) => {
-    const [, rx, rz] = /^r\.(-?\d+)\.(-?\d+)\.mca$/.exec(f);
-    return { regionX: +rx, regionZ: +rz, buffer: fs.readFileSync(path.join(info.regionDir, f)) };
-  }));
-await staging.regenPreview(adapter.getProject(worldId));
-console.log(`\nSave de démonstration : ${savePath}`);
-console.log(`  → projet « ${info.name} », avec « Appliquer au monde » actif.`);
+staging.seedRegions(worldId, readRegions(info, [{ regionX: 0, regionZ: 0 }, { regionX: 1, regionZ: 0 }]));
+{
+  const p2 = adapter.getProject(worldId);
+  const store = staging.loadStore(p2);
+  const lim = { min: { x: 0, y: -64, z: 0 }, max: { x: 1023, y: 319, z: 511 } };
+  await store.warmup(lim);
+  const sparse = store.deriveSparse(lim, staging.limits.previewMaxBlocks, { truncate: true });
+  adapter.saveExtent(worldId, {
+    min: sparse.min,
+    max: { x: sparse.min.x + sparse.size.x - 1, y: sparse.min.y + sparse.size.y - 1, z: sparse.min.z + sparse.size.z - 1 },
+  });
+  await staging.regenPreview(adapter.getProject(worldId));
+}
 
 // La vallée redevient le projet le plus récent, donc celui qui s'ouvre : c'est
 // elle qui montre quelque chose. La save reste dans le second onglet.

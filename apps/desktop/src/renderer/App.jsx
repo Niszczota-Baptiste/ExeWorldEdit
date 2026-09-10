@@ -7,6 +7,7 @@ import Inspector from './shell/Inspector.jsx';
 import BlockPalette from './shell/BlockPalette.jsx';
 import StatusBar from './shell/StatusBar.jsx';
 import ToolWheel from './shell/ToolWheel.jsx';
+import WorldPicker from './shell/WorldPicker.jsx';
 import Viewport from './viewport/Viewport.jsx';
 import { useApp } from './store.js';
 
@@ -52,10 +53,12 @@ export default function App() {
     };
   }, [openPath]);
 
-  // Progression des opérations longues, relayée depuis le moteur.
+  // Événements venus du processus principal : progression des opérations
+  // longues, et chemin à ouvrir passé au lancement.
   useEffect(() => window.titi.onEngineEvent((msg) => {
     if (msg.event === 'progress') useApp.setState({ busy: { operation: msg.operation, phase: msg.phase, pct: msg.pct } });
-  }), []);
+    if (msg.event === 'open-path') openPath(msg.path);
+  }), [openPath]);
 
   // Raccourcis globaux.
   useEffect(() => {
@@ -147,6 +150,7 @@ export default function App() {
       </div>
 
       <StatusBar />
+      <WorldPicker />
     </div>
   );
 }

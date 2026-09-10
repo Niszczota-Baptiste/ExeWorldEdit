@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readSaveInfo, listRegions, probeWorldLock, backupRegions, applyToWorld } from '../src/world/save.js';
+import {
+  readSaveInfo, listRegions, probeWorldLock, backupRegions, applyToWorld,
+  worldOverview, regionsForBBox, regionBounds, selectRegions, readRegions,
+} from '../src/world/save.js';
 import { extractMcaEntries } from '../src/worldedit/zipReader.js';
 import { buildRegion, readBack } from './fixtures/region.js';
 
@@ -216,4 +219,87 @@ test('la sauvegarde est prise AVANT l’écriture, jamais après', async () => {
   assert.notDeepEqual(maintenant, original, 'et le monde, lui, a bien changé');
   const relu = await readBack(maintenant);
   assert.equal(relu.get('5,5,5').Name, OAK);
+});
+
+// ── Choisir quoi charger ────────────────────────────────────────────────────
+//
+// C'est le cœur de l'ouverture d'un vrai monde : plusieurs centaines de régions
+// existent, on n'en charge qu'une poignée.
+
+test('une boîte monde donne les régions qu’elle recoupe', () => {
+  const at = (x0, z0, x1, z1) => regionsForBBox({ min: { x: x0, z: z0 }, max: { x: x1, z: z1 } })
+    .map((r) => `${r.regionX},${r.regionZ}`).sort();
+
+  assert.deepEqual(at(0, 0, 100, 100), ['0,0'], 'une petite zone tient dans une région');
+  assert.deepEqual(at(0, 0, 511, 511), ['0,0'], 'une région fait 512 blocs, bornes incluses');
+  assert.deepEqual(at(0, 0, 512, 0), ['0,0', '1,0'], 'un bloc de plus et on déborde');
+  assert.deepEqual(at(500, 500, 520, 520), ['0,0', '0,1', '1,0', '1,1'], 'un coin recoupe quatre régions');
+});
+
+test('les coordonnées négatives tombent dans les bonnes régions', () => {
+  // C'est LE piège : -1 appartient à la région -1, pas à la région 0. Une
+  // division entière naïve chargerait la mauvaise moitié du monde.
+  const at = (x0, z0, x1, z1) => regionsForBBox({ min: { x: x0, z: z0 }, max: { x: x1, z: z1 } })
+    .map((r) => `${r.regionX},${r.regionZ}`).sort();
+
+  assert.deepEqual(at(-1, -1, -1, -1), ['-1,-1']);
+  assert.deepEqual(at(-512, -512, -512, -512), ['-1,-1']);
+  assert.deepEqual(at(-513, 0, -513, 0), ['-2,0']);
+  assert.deepEqual(at(-10, -10, 10, 10), ['-1,-1', '-1,0', '0,-1', '0,0'], 'à cheval sur l’origine');
+});
+
+test('des coins donnés à l’envers donnent le même résultat', () => {
+  const a = regionsForBBox({ min: { x: 600, z: 600 }, max: { x: 100, z: 100 } });
+  const b = regionsForBBox({ min: { x: 100, z: 100 }, max: { x: 600, z: 600 } });
+  assert.deepEqual(a.map((r) => `${r.regionX},${r.regionZ}`).sort(), b.map((r) => `${r.regionX},${r.regionZ}`).sort());
+});
+
+test('regionBounds rend la boîte monde d’une région', () => {
+  assert.deepEqual(regionBounds(0, 0), { minX: 0, minZ: 0, maxX: 511, maxZ: 511 });
+  assert.deepEqual(regionBounds(-1, 2), { minX: -512, minZ: 1024, maxX: -1, maxZ: 1535 });
+});
+
+test('la carte d’un monde se lit sans rien décoder', () => {
+  const { save } = makeSave({ withEntities: true, regions: [[0, 0], [1, 0], [-2, 3]] });
+  const info = readSaveInfo(save);
+  const map = worldOverview(info);
+
+  assert.equal(map.count, 3);
+  assert.ok(map.bytes > 0, 'les tailles de fichier sont relevées');
+  assert.deepEqual(map.bounds, { minX: -2, maxX: 1, minZ: 0, maxZ: 3 });
+  // Triées par Z puis X : la carte se dessine ligne par ligne.
+  assert.deepEqual(map.regions.map((r) => `${r.regionX},${r.regionZ}`), ['0,0', '1,0', '-2,3']);
+  assert.ok(map.regions.every((r) => r.hasEntities), 'les régions d’entités sont signalées');
+});
+
+test('un monde vide rend une carte vide, pas une erreur', () => {
+  const { save } = makeSave({ regions: [] });
+  const map = worldOverview(readSaveInfo(save));
+  assert.equal(map.count, 0);
+  assert.equal(map.bounds, null);
+});
+
+test('on ne charge que les régions qui existent vraiment', () => {
+  const { save } = makeSave({ regions: [[0, 0], [1, 0]] });
+  const info = readSaveInfo(save);
+
+  // Une zone qui déborde dans du terrain jamais généré : normal, on prend ce
+  // qu'il y a plutôt que d'échouer sur du vide.
+  const wanted = regionsForBBox({ min: { x: 0, z: 0 }, max: { x: 2000, z: 2000 } });
+  assert.ok(wanted.length >= 16, 'la zone demandée couvre beaucoup de régions');
+
+  const kept = selectRegions(info, wanted);
+  assert.deepEqual(kept.map((r) => `${r.regionX},${r.regionZ}`).sort(), ['0,0', '1,0']);
+});
+
+test('readRegions rend des buffers relisibles, et rien d’autre', async () => {
+  const { save } = makeSave({ regions: [[0, 0], [5, 5]] });
+  const info = readSaveInfo(save);
+
+  const loaded = readRegions(info, regionsForBBox({ min: { x: 0, z: 0 }, max: { x: 100, z: 100 } }));
+  assert.equal(loaded.length, 1, 'la région lointaine n’est pas chargée');
+  assert.equal(loaded[0].regionX, 0);
+
+  const blocks = await readBack(loaded[0].buffer);
+  assert.equal(blocks.get('0,0,0').Name, 'minecraft:stone');
 });

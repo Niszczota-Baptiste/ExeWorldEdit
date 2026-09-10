@@ -73,6 +73,107 @@ export function listRegions(dir) {
     .filter(Boolean);
 }
 
+// ── Choisir QUOI charger ────────────────────────────────────────────────────
+//
+// Une région couvre 512×512 blocs. Un monde survécu quelques mois en compte
+// facilement plusieurs centaines, soit des dizaines de gigaoctets : tout
+// charger n'est pas une option, c'est une panne. On ouvre donc une save en deux
+// temps — d'abord la CARTE de ce qui existe (readdir + stat, instantané), puis
+// seulement les régions qui recoupent la zone demandée.
+
+export const REGION_SPAN = 512;
+
+const fdiv = (a, b) => Math.floor(a / b);
+
+/** Boîte monde couverte par une région, en X/Z (inclusive). */
+export function regionBounds(regionX, regionZ) {
+  return {
+    minX: regionX * REGION_SPAN,
+    minZ: regionZ * REGION_SPAN,
+    maxX: regionX * REGION_SPAN + REGION_SPAN - 1,
+    maxZ: regionZ * REGION_SPAN + REGION_SPAN - 1,
+  };
+}
+
+/**
+ * Régions qu'une boîte en coordonnées MONDE recoupe.
+ * @param {{min:{x,z}, max:{x,z}}} bbox
+ * @returns {{regionX:number, regionZ:number}[]}
+ */
+export function regionsForBBox(bbox) {
+  const out = [];
+  const x0 = Math.min(bbox.min.x, bbox.max.x), x1 = Math.max(bbox.min.x, bbox.max.x);
+  const z0 = Math.min(bbox.min.z, bbox.max.z), z1 = Math.max(bbox.min.z, bbox.max.z);
+  for (let rz = fdiv(z0, REGION_SPAN); rz <= fdiv(z1, REGION_SPAN); rz++) {
+    for (let rx = fdiv(x0, REGION_SPAN); rx <= fdiv(x1, REGION_SPAN); rx++) {
+      out.push({ regionX: rx, regionZ: rz });
+    }
+  }
+  return out;
+}
+
+/**
+ * Carte de ce que contient une save, SANS rien décoder : on lit le nom et la
+ * taille de chaque fichier, rien de plus. Sur un monde de plusieurs
+ * gigaoctets, ça reste instantané, et c'est ce qui permet de montrer la carte
+ * avant de choisir quoi ouvrir.
+ *
+ * @returns {{
+ *   regions: {regionX, regionZ, bytes, hasEntities}[],
+ *   bounds: {minX, minZ, maxX, maxZ}|null,
+ *   count: number,
+ *   bytes: number,
+ * }}
+ */
+export function worldOverview(info) {
+  const entities = new Set(
+    listRegions(info.entitiesDir).map((r) => `${r.regionX},${r.regionZ}`),
+  );
+
+  const regions = listRegions(info.regionDir).map((r) => {
+    let bytes = 0;
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- nom validé par REGION_FILE_RE
+    try { bytes = fs.statSync(path.join(info.regionDir, r.file)).size; } catch { /* disparue entre-temps */ }
+    return {
+      regionX: r.regionX, regionZ: r.regionZ, bytes,
+      hasEntities: entities.has(`${r.regionX},${r.regionZ}`),
+    };
+  }).sort((a, b) => (a.regionZ - b.regionZ) || (a.regionX - b.regionX));
+
+  if (!regions.length) return { regions: [], bounds: null, count: 0, bytes: 0 };
+
+  const bounds = {
+    minX: Math.min(...regions.map((r) => r.regionX)),
+    maxX: Math.max(...regions.map((r) => r.regionX)),
+    minZ: Math.min(...regions.map((r) => r.regionZ)),
+    maxZ: Math.max(...regions.map((r) => r.regionZ)),
+  };
+  return {
+    regions, bounds,
+    count: regions.length,
+    bytes: regions.reduce((s, r) => s + r.bytes, 0),
+  };
+}
+
+/**
+ * Ne retient, parmi les régions demandées, que celles qui EXISTENT vraiment.
+ * Une zone qui déborde dans du terrain jamais généré est normale : on charge ce
+ * qu'il y a, sans lever d'erreur pour du vide.
+ */
+export function selectRegions(info, wanted) {
+  const present = new Set(listRegions(info.regionDir).map((r) => `${r.regionX},${r.regionZ}`));
+  return wanted.filter((r) => present.has(`${r.regionX},${r.regionZ}`));
+}
+
+/** Lit les buffers des régions demandées. */
+export function readRegions(info, wanted) {
+  return selectRegions(info, wanted).map((r) => ({
+    regionX: r.regionX, regionZ: r.regionZ,
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- nom reconstruit depuis des entiers
+    buffer: fs.readFileSync(path.join(info.regionDir, regionFileName(r.regionX, r.regionZ))),
+  }));
+}
+
 /**
  * Le monde est-il ouvert dans Minecraft ?
  *

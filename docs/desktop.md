@@ -200,9 +200,40 @@ pire que de l'avouer.
 |---|---|
 | `.mca` | un projet, région seule |
 | `.zip` d'un dossier `region/` | un projet, toutes ses régions |
-| dossier de save (`level.dat` + `region/`) | un projet **avec sa save attachée** — seul cas où « Appliquer au monde » existe |
-| dossier `region/` isolé | un projet, sans save attachée |
+| dossier de save (`level.dat` + `region/`) | sa **carte** — on choisit ensuite la zone (voir plus bas) ; le projet garde la save attachée, seul cas où « Appliquer au monde » existe |
+| dossier `region/` isolé | sa carte aussi, sans save attachée |
 | `.schem` (Sponge), `.litematic` | un projet : régions vierges à la taille du schematic, puis tamponnage |
+
+Un chemin peut aussi arriver **au lancement** (`titi-worldedit.exe "…/saves/Monde"`,
+« ouvrir avec », un fichier lâché sur l'icône) : il suit le même chemin qu'un
+glisser-déposer, sans traitement à part.
+
+### Ouvrir un monde : la carte d'abord, la zone ensuite
+
+![Choisir la zone](images/selecteur-zone.png)
+
+Une région couvre 512 × 512 blocs. Un monde joué quelques mois en compte
+facilement plusieurs centaines, soit des dizaines de gigaoctets : **tout charger
+n'est pas lent, c'est impossible**. L'ouverture se fait donc en deux temps.
+
+1. `worldOverview` lit les seuls noms et tailles de fichiers — aucun décodage,
+   instantané même sur un monde énorme — et rend la carte de ce qui existe.
+2. On désigne les régions voulues : au clic, au glissé pour un rectangle, ou en
+   entrant des coordonnées du F3 avec un rayon. `regionsForBBox` traduit une
+   boîte en coordonnées monde en indices de région, et seules celles-là sont
+   matérialisées dans le staging.
+
+Le piège de cette traduction, ce sont les **coordonnées négatives** : le bloc
+`-1` appartient à la région `-1`, pas à la région `0`. Une division entière naïve
+chargerait la mauvaise moitié du monde, en silence. Des tests dédiés couvrent
+l'origine et ses quatre quadrants.
+
+Une zone qui déborde sur du terrain jamais généré est normale : on charge ce
+qu'il y a et on annonce combien manquait, plutôt que d'échouer sur du vide.
+
+`loadMoreRegions` étend ensuite un projet ouvert. Les régions déjà chargées ne
+sont **pas** rechargées — le travail en cours dessus serait sinon écrasé par le
+contenu du disque.
 
 Un schematic n'a ni chunks ni coordonnées absolues. Plutôt que d'en faire un cas
 particulier que tout le moteur devrait connaître, on lui fabrique des régions et

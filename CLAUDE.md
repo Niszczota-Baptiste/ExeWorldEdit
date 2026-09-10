@@ -65,7 +65,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (167 tests aujourd'hui)
+npm test          # tous les paquets (176 tests aujourd'hui)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -92,7 +92,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Un outil dans l'interface | `TOOLS` et `TOOL_OPS` (`apps/desktop/src/renderer/store.js`) — l'inspecteur génère ses champs depuis le descripteur du moteur, il n'y a pas de formulaire à écrire |
 | Une couleur de bloc pour le viewport | `EXTRA` dans `apps/desktop/src/renderer/viewport/blockColors.js` (en attendant l'atlas) |
 | Une icône | `apps/desktop/src/renderer/shell/icons.js` — le SEUL fichier du renderer qui importe `lucide-react` |
-| Un format d'entrée | `openAnyPath` (`apps/desktop/src/main/index.js`) décide selon l'extension ; dialogues et glisser-déposer y passent tous les deux |
+| Un format d'entrée | `openAnyPath` (`apps/desktop/src/main/index.js`) décide selon l'extension ; dialogue, glisser-déposer et chemin de lancement y passent tous |
 
 ## Ce qui n'est pas encore là
 
@@ -131,6 +131,19 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
 - **Un panneau redimensionnable n'est pas un conteneur flex.** `flex: 1` sur le
   viewport ne lui donnait aucune hauteur, et le canvas se rendait en 1175×0 —
   sans la moindre erreur. `height: 100%`.
+- **Une save ne s'ouvre jamais en entier.** Plusieurs centaines de régions,
+  des dizaines de gigaoctets : `worldOverview` rend la carte (noms et tailles
+  de fichiers seulement), puis on ne matérialise que les régions demandées.
+- **Le bloc −1 est dans la région −1, pas la région 0.** Toute traduction
+  coordonnées monde → région passe par `regionsForBBox`, qui utilise une
+  division PLANCHER. Une division entière naïve charge la mauvaise moitié du
+  monde sans rien signaler.
+- **Un état initial paresseux ne se rejoue pas.** `useState(() => …)` dans un
+  composant monté dès le démarrage s'exécute avant que les données existent :
+  la présélection du `WorldPicker` ne prenait jamais. Ce qui dépend d'une
+  donnée qui arrive plus tard va dans un effet.
+- **Une grille en `1fr` s'étire.** La carte des régions doit garder ses
+  proportions de monde : colonnes à taille fixe, jamais `1fr`.
 - **Le verrou `session.lock` n'est détectable que sur Windows.** Ailleurs il est
   consultatif et une ouverture réussie ne prouve rien. `probeWorldLock` renvoie
   `{ locked, reliable }` : ne jamais réduire ça à un booléen, ce serait

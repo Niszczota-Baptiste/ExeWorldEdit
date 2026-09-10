@@ -6,7 +6,10 @@ import {
   schematicToRegions, volumeToSchematic,
 } from '@titi/we-engine/staging';
 import { regionCoordsFromName } from '@titi/we-engine/anvil';
-import { readSaveInfo, probeWorldLock, applyToWorld } from '@titi/we-engine/world';
+import {
+  readSaveInfo, probeWorldLock, applyToWorld,
+  worldOverview, regionsForBBox, regionBounds, selectRegions, readRegions, REGION_SPAN,
+} from '@titi/we-engine/world';
 import { schematicToSponge, schematicToLitematic } from '@titi/we-engine/worldedit';
 
 // LE MOTEUR — tourne dans un `utilityProcess`, jamais dans le renderer.
@@ -118,31 +121,95 @@ const methods = {
   },
 
   /**
-   * Ouvre un dossier de save ou un dossier `region/`. Toutes ses régions
-   * deviennent le staging du projet, et le dossier d'origine est mémorisé pour
-   * « Appliquer au monde ».
+   * Regarde ce que contient une save SANS rien ouvrir : la liste des régions
+   * présentes, leur taille, l'emprise totale. Instantané même sur un monde de
+   * plusieurs gigaoctets, parce qu'on ne lit que des noms de fichiers.
+   *
+   * C'est le premier temps de l'ouverture d'un monde : on montre la carte,
+   * l'utilisateur choisit sa zone, et on ne charge que ça.
    */
-  async openWorld({ dirPath }) {
+  inspectWorldFolder({ dirPath }) {
+    const info = readSaveInfo(dirPath);
+    if (info.kind === 'unknown') throw new Error('not_a_world');
+    if (!info.regionDir) throw new Error('no_region_dir');
+    const map = worldOverview(info);
+    if (!map.count) throw new Error('no_region');
+    return {
+      path: info.root,
+      name: info.name,
+      kind: info.kind,
+      hasEntities: !!info.entitiesDir,
+      lock: probeWorldLock(info),
+      regionSpan: REGION_SPAN,
+      ...map,
+      // Emprise en coordonnées MONDE, pas en indices de région : c'est ce que
+      // l'utilisateur lit sur son F3.
+      worldBounds: map.bounds && {
+        minX: map.bounds.minX * REGION_SPAN,
+        minZ: map.bounds.minZ * REGION_SPAN,
+        maxX: map.bounds.maxX * REGION_SPAN + REGION_SPAN - 1,
+        maxZ: map.bounds.maxZ * REGION_SPAN + REGION_SPAN - 1,
+      },
+    };
+  },
+
+  /**
+   * Ouvre une save en ne chargeant QUE les régions demandées.
+   *
+   * Un monde joué quelques mois compte des centaines de régions, soit des
+   * dizaines de gigaoctets. Tout matérialiser n'est pas lent, c'est impossible.
+   * `area` (une boîte en coordonnées monde) ou `regions` (des indices explicites)
+   * décide de ce qui entre dans le staging ; sans l'un ni l'autre, on refuse
+   * plutôt que de tout prendre.
+   */
+  async openWorld({ dirPath, area, regions, name }) {
     const info = readSaveInfo(dirPath);
     if (info.kind === 'unknown') throw new Error('not_a_world');
     if (!info.regionDir) throw new Error('no_region_dir');
 
-    const files = listRegionFilesIn(info.regionDir);
-    if (!files.length) throw new Error('no_region');
+    const wanted = regions?.length ? regions : (area ? regionsForBBox(area) : null);
+    if (!wanted) throw new Error('no_area');
+
+    const present = selectRegions(info, wanted);
+    if (!present.length) throw new Error('empty_area');
 
     const id = `p${Date.now().toString(36)}`;
     adapter.saveProject({
-      id, name: info.name,
+      id, name: name || info.name,
       min: { x: 0, y: -64, z: 0 }, size: { x: 1, y: 1, z: 1 },
       world: { path: info.root, kind: info.kind },
     });
-    staging.seedRegions(id, files.map((f) => ({
-      regionX: f.regionX, regionZ: f.regionZ,
-      // eslint-disable-next-line security/detect-non-literal-fs-filename -- dossier choisi par l'utilisateur, nom validé
-      buffer: fs.readFileSync(path.join(info.regionDir, f.file)),
-    })));
+    staging.seedRegions(id, readRegions(info, present));
     await methods.rescanExtent({ id });
-    return { ...projectState(project(id)), lock: probeWorldLock(info) };
+
+    return {
+      ...projectState(project(id)),
+      lock: probeWorldLock(info),
+      loaded: present.length,
+      // Ce qui a été demandé mais n'existe pas : du terrain jamais généré.
+      // Le dire évite de croire qu'on a chargé une zone qu'on n'a pas.
+      missing: wanted.length - present.length,
+    };
+  },
+
+  /**
+   * Étend un projet déjà ouvert avec des régions voisines. Les régions déjà
+   * chargées ne sont PAS rechargées : le travail en cours dessus resterait
+   * sinon écrasé par le contenu du disque.
+   */
+  async loadMoreRegions({ id, area }) {
+    const p = project(id);
+    if (!p.world?.path) throw new Error('no_world');
+    const info = readSaveInfo(p.world.path);
+
+    const already = new Set(staging.listRegionFiles(id).map((f) => `${f.regionX},${f.regionZ}`));
+    const wanted = regionsForBBox(area).filter((r) => !already.has(`${r.regionX},${r.regionZ}`));
+    const present = selectRegions(info, wanted);
+    if (!present.length) return { ...projectState(p), loaded: 0, missing: wanted.length };
+
+    staging.seedRegions(id, readRegions(info, present));
+    await methods.rescanExtent({ id });
+    return { ...projectState(project(id)), loaded: present.length, missing: wanted.length - present.length };
   },
 
   /** Ce que l'écran « Appliquer au monde » doit savoir avant de proposer quoi que ce soit. */
@@ -157,6 +224,9 @@ const methods = {
       hasEntities: !!info.entitiesDir,
       lock: probeWorldLock(info),
       regions: staging.listRegionFiles(id).length,
+      loadedRegions: staging.listRegionFiles(id).map((f) => ({
+        regionX: f.regionX, regionZ: f.regionZ, ...regionBounds(f.regionX, f.regionZ),
+      })),
     };
   },
 
@@ -289,14 +359,6 @@ const methods = {
     node: process.versions.node,
   }),
 };
-
-/** Régions d'un dossier arbitraire (pas forcément le staging). */
-function listRegionFilesIn(dir) {
-  // eslint-disable-next-line security/detect-non-literal-fs-filename -- dossier choisi par l'utilisateur
-  return fs.readdirSync(dir)
-    .map((f) => { const m = /^r\.(-?\d+)\.(-?\d+)\.mca$/.exec(f); return m ? { file: f, regionX: Number(m[1]), regionZ: Number(m[2]) } : null; })
-    .filter(Boolean);
-}
 
 function send(message) {
   process.parentPort?.postMessage(message);

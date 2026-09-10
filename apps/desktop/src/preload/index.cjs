@@ -9,7 +9,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const ENGINE_METHODS = [
   'listProjects', 'getProject', 'closeProject', 'rescanExtent',
-  'openFile', 'openSchematic', 'openWorld',
+  'openFile', 'openSchematic', 'openWorld', 'inspectWorldFolder', 'loadMoreRegions',
   'getGeometry',
   'apply', 'undo', 'redo', 'reset', 'audit',
   'inspectWorld',

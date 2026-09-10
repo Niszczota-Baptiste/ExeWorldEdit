@@ -45,6 +45,8 @@ export const useApp = create((set, get) => ({
   wheelOpen: false,
   paletteQuery: '',
   toast: null,
+  /** Carte d'une save en attente de choix de zone (voir WorldPicker). */
+  pendingWorld: null,
 
   project: () => get().projects.find((p) => p.id === get().activeId) || null,
 
@@ -87,10 +89,48 @@ export const useApp = create((set, get) => ({
   async openWorld() { return get()._opened(() => api().openWorldFolder()); },
   async openPath(filePath) { return get()._opened(() => api().openPath(filePath)); },
 
+  cancelWorld: () => set({ pendingWorld: null }),
+
+  /** Second temps de l'ouverture d'un monde : la zone est choisie, on charge. */
+  async openWorldArea(regions) {
+    const world = get().pendingWorld;
+    if (!world) return null;
+    set({ pendingWorld: null });
+    return get()._opened(async () => {
+      const project = await api().engine.openWorld({ dirPath: world.path, regions, name: world.name });
+      if (project?.missing) {
+        get().say(`${project.loaded} régions chargées ; ${project.missing} n’existent pas encore dans ce monde.`);
+      }
+      return project;
+    });
+  },
+
+  /** Étend un projet ouvert avec les régions voisines. */
+  async loadMore(area) {
+    const id = get().activeId;
+    if (!id) return;
+    try {
+      const res = await api().engine.loadMoreRegions({ id, area });
+      await get().refreshProjects();
+      set({ geometry: await api().engine.getGeometry({ id }) });
+      get().say(res.loaded ? `${res.loaded} région(s) ajoutée(s).` : 'Rien de plus à charger dans cette zone.');
+    } catch (e) {
+      get().say(errorText(e, 'chargement'));
+    }
+  },
+
   async _opened(fn) {
     try {
-      const project = await fn();
-      if (!project) return null;
+      const result = await fn();
+      if (!result) return null;
+
+      // Un dossier de monde ne rend pas un projet mais sa CARTE : on n'ouvre
+      // pas des dizaines de gigaoctets sans demander quoi charger.
+      if (result.regions && !result.id) {
+        set({ pendingWorld: result });
+        return null;
+      }
+      const project = result;
       await get().refreshProjects();
       await get().activate(project.id);
       // Un monde ouvert dans Minecraft s'ouvre quand même en lecture — c'est
@@ -202,6 +242,8 @@ function errorText(e, context) {
     not_a_world: 'Ce dossier n’est ni une save ni un dossier region/.',
     no_region_dir: 'Ce monde n’a pas de dossier region/.',
     no_region: 'Ce dossier ne contient aucun fichier de région.',
+    no_area: 'Aucune zone demandée : choisis les régions à ouvrir.',
+    empty_area: 'Cette zone n’a jamais été générée dans ce monde.',
     bad_schematic: 'Ce fichier n’est pas un schematic lisible.',
   };
   return table[code] || `Échec de ${context} : ${code}`;
