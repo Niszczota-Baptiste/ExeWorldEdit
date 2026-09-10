@@ -34,10 +34,14 @@ try {
     macOS     pkill -f "Titi WorldEdit"
     Linux     pkill -f titidesktop
 
-  Si ça résiste, c'est l'explorateur de fichiers ou l'antivirus qui tient le
-  dossier. Ferme toute fenêtre ouverte sur release/, ou construis ailleurs :
+  Si ça résiste, quelque chose d'autre tient le dossier. Sous Windows, un
+  processus dont le RÉPERTOIRE COURANT est dedans suffit — un terminal, un
+  explorateur de fichiers, un antivirus en cours d'analyse.
 
-    npx electron-builder --win -c.directories.output=release2
+  Sortie de secours, qui ne touche pas au dossier verrouillé :
+
+    cd apps/desktop
+    npx electron-builder --win --publish never --config.directories.output=release2
 `);
   process.exit(1);
 }
