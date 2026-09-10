@@ -7,3 +7,4 @@
 export * as anvil from './anvil/index.js';
 export * as worldedit from './worldedit/index.js';
 export * as storage from './storage/index.js';
+export * as staging from './staging/index.js';
