@@ -768,3 +768,53 @@ test('annuler puis refaire retombe sur le même aperçu', async () => {
 
   assert.deepEqual(previewWorld(staging.readPreview('p1')), avant);
 });
+
+// ── Plafonds réglables ──────────────────────────────────────────────────────
+
+test('normalizeLimits borne les plafonds réglables', async () => {
+  const { normalizeLimits, LIMIT_RANGES, DEFAULT_LIMITS } = await import('../src/staging/geometry.js');
+
+  assert.deepEqual(normalizeLimits(), DEFAULT_LIMITS);
+  assert.equal(normalizeLimits({ maxUndo: 1e9 }).maxUndo, LIMIT_RANGES.maxUndo.max);
+  assert.equal(normalizeLimits({ maxUndo: -5 }).maxUndo, LIMIT_RANGES.maxUndo.min);
+  assert.equal(normalizeLimits({ wandMax: 'beaucoup' }).wandMax, DEFAULT_LIMITS.wandMax);
+  assert.equal(normalizeLimits({ maxUndo: 12 }).maxUndo, 12);
+});
+
+test('la hauteur du monde n’est PAS réglable', async () => {
+  const { normalizeLimits, DEFAULT_LIMITS } = await import('../src/staging/geometry.js');
+  // Déplacer le plafond du monde produirait des régions qu'aucun jeu ne relit.
+  const forcé = normalizeLimits({ worldMinY: -4000, worldMaxY: 9000 });
+  assert.equal(forcé.worldMinY, DEFAULT_LIMITS.worldMinY);
+  assert.equal(forcé.worldMaxY, DEFAULT_LIMITS.worldMaxY);
+});
+
+test('setLimits prend effet tout de suite sur une opération', async () => {
+  const { staging, project } = makeProject();
+  const grosse = sel({ x: 0, y: 0, z: 0 }, { x: 15, y: 15, z: 15 }); // 4096 cases
+
+  staging.setLimits({ maxSelectionVolume: 1_000_000 });
+  assert.equal(staging.limits.maxSelectionVolume, 1_000_000);
+
+  // Sous le plancher de la borne : ramené au minimum, pas accepté tel quel.
+  const applique = staging.setLimits({ maxSelectionVolume: 1 });
+  assert.equal(applique.maxSelectionVolume, 1_000_000);
+
+  // Et une opération passe bien avec le plafond courant.
+  const res = await staging.applyOperation({
+    project: project(), operation: 'set', params: { block: { name: OAK } },
+    selection: grosse, actor: 't',
+  });
+  assert.ok(res.blocksChanged > 0);
+});
+
+test('un plafond réglé survit et s’applique au staging suivant', async () => {
+  const { adapter, staging } = makeProject();
+  staging.setLimits({ maxUndo: 7 });
+  adapter.writeSettings({ limits: { maxUndo: 7 } });
+
+  const { createStaging } = await import('../src/staging/index.js');
+  const { normalizeLimits } = await import('../src/staging/geometry.js');
+  const relance = createStaging(adapter, normalizeLimits(adapter.readSettings().limits));
+  assert.equal(relance.limits.maxUndo, 7);
+});

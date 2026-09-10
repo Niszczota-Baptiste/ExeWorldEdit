@@ -17,7 +17,7 @@ import {
   MaskedVolume, sameBlock,
 } from '../worldedit/transform.js';
 import {
-  DEFAULT_LIMITS, fdiv, buildExtent, buildLimits, validateSelection,
+  DEFAULT_LIMITS, normalizeLimits, fdiv, buildExtent, buildLimits, validateSelection,
   clampBBox, unionBBox, regionKeysForBBox, panelPlane, weightedPicker,
   PANEL_PRESETS, clamp01, tick, phaseTimer,
 } from './geometry.js';
@@ -76,6 +76,14 @@ export const OPERATION_NAMES = Object.keys(OPS);
  * @param {Partial<typeof DEFAULT_LIMITS>} [options] plafonds, réglables par l'app
  */
 export function createStaging(adapter, options = {}) {
+  // Muté en place par `setLimits` : tous les usages lisent `limits.x` au moment
+  // de l'appel, donc un changement prend effet sans reconstruire le staging
+  // (et sans perdre le cache d'aperçu).
+  //
+  // PAS de bornage ici : `options` vient du code appelant, pas de
+  // l'utilisateur. Un test qui demande un budget d'aperçu de 10 blocs pour
+  // vérifier la troncature doit obtenir 10. Le bornage est à la frontière des
+  // réglages — `setLimits`.
   const limits = { ...DEFAULT_LIMITS, ...options };
 
   // ── Arborescence de travail, sous le dossier que l'adapter nous donne ─────
@@ -271,6 +279,15 @@ export function createStaging(adapter, options = {}) {
     const store = loadStore(project);
     await store.warmup(bbox);
     writePreview(project.id, store.deriveSparse(bbox, limits.previewMaxBlocks, { truncate: true }));
+  }
+
+  /**
+   * Relève ou abaisse les plafonds depuis les RÉGLAGES, donc en bornant : c'est
+   * ici qu'entre une valeur saisie par un humain. Rend le jeu complet appliqué.
+   */
+  function setLimits(patch) {
+    Object.assign(limits, normalizeLimits({ ...limits, ...(patch || {}) }));
+    return { ...limits };
   }
 
   // ── API ───────────────────────────────────────────────────────────────────
@@ -710,6 +727,7 @@ export function createStaging(adapter, options = {}) {
 
   return {
     limits,
+    setLimits,
     adapter,
     // état
     hasPendingEdits,

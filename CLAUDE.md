@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (235 tests aujourd'hui : 210 moteur, 25 desktop)
+npm test          # tous les paquets (239 tests aujourd'hui : 214 moteur, 25 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -98,7 +98,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Une propriété d'état de bloc à transformer | `src/worldedit/blockstates.js` + une assertion par propriété dans `test/worldedit.test.js` |
 | Un format d'échange | `src/worldedit/schematicFormats.js` + un test de round-trip |
 | Une chose qui dépend d'où vivent les données | une méthode du `StorageAdapter` + son cas dans la suite de contrat (`test/storage.test.js`) |
-| Un plafond réglable | `DEFAULT_LIMITS` (`src/staging/geometry.js`), jamais une variable d'environnement |
+| Un plafond réglable | `DEFAULT_LIMITS` + son entrée dans `LIMIT_RANGES` (`src/staging/geometry.js`), jamais une variable d'environnement. L'interface génère son champ depuis les bornes, il n'y a rien à écrire côté renderer |
 | Une capacité pour le renderer | la méthode dans `apps/desktop/src/engine/index.js`, puis son nom dans `ENGINE_METHODS` du preload |
 | Un outil dans l'interface | `TOOLS` et `TOOL_OPS` (`apps/desktop/src/renderer/store.js`) — l'inspecteur génère ses champs depuis le descripteur du moteur, il n'y a pas de formulaire à écrire |
 | Une couleur de bloc pour le viewport | `EXTRA` dans `apps/desktop/src/renderer/viewport/blockColors.js` (en attendant l'atlas) |

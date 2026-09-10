@@ -24,6 +24,37 @@ export const DEFAULT_LIMITS = {
   maxUndo: 30,
 };
 
+/**
+ * Plafonds RÉGLABLES, et leurs bornes.
+ *
+ * `worldMinY` / `worldMaxY` n'y sont pas : ce ne sont pas des préférences mais
+ * la hauteur du monde Minecraft. Les rendre réglables laisserait écrire hors du
+ * monde, et produirait des régions qu'aucun jeu ne relirait.
+ */
+export const LIMIT_RANGES = {
+  maxSelectionVolume: { min: 1_000_000, max: 2_000_000_000, step: 1_000_000, label: 'Volume de sélection maximal', unit: 'blocs' },
+  previewMaxBlocks: { min: 250_000, max: 50_000_000, step: 250_000, label: 'Budget d’aperçu 3D', unit: 'blocs' },
+  cropMaxBlocks: { min: 250_000, max: 50_000_000, step: 250_000, label: 'Extraction de zone / export décalé', unit: 'blocs' },
+  wandMax: { min: 10_000, max: 5_000_000, step: 10_000, label: 'Baguette magique', unit: 'blocs' },
+  maxUndo: { min: 1, max: 200, step: 1, label: 'Profondeur d’annulation', unit: 'opérations' },
+};
+export const TUNABLE_LIMITS = Object.keys(LIMIT_RANGES);
+
+/**
+ * Complète et borne un jeu de plafonds. Ce qui n'est pas réglable revient
+ * toujours de `DEFAULT_LIMITS`, quoi qu'on passe — un `settings.json` écrit à
+ * la main ne peut donc pas déplacer le plafond du monde.
+ */
+export function normalizeLimits(raw = {}) {
+  const out = { ...DEFAULT_LIMITS };
+  for (const key of TUNABLE_LIMITS) {
+    const { min, max } = LIMIT_RANGES[key];
+    const v = Number(raw?.[key]);
+    if (Number.isFinite(v)) out[key] = Math.round(Math.min(max, Math.max(min, v)));
+  }
+  return out;
+}
+
 export const fdiv = (a, b) => Math.floor(a / b);
 
 /** Emprise RÉELLE du contenu — sert au warmup et à l'aperçu. */

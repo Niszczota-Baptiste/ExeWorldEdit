@@ -1,4 +1,5 @@
-import { Settings2, Gauge, Type, Layers, RotateCcw } from './icons.js';
+import { useEffect, useState } from 'react';
+import { Settings2, Gauge, Type, Layers, RotateCcw, Boxes } from './icons.js';
 import { useApp } from '../store.js';
 import { ACCENTS, RANGES, DEFAULT_SETTINGS } from '../theme.js';
 
@@ -17,6 +18,9 @@ export default function Settings() {
   const update = useApp((s) => s.updateSettings);
   const reset = useApp((s) => s.resetSettings);
   const info = useApp((s) => s.engineInfo);
+  const limits = useApp((s) => s.limits);
+  const limitRanges = useApp((s) => s.limitRanges);
+  const updateLimits = useApp((s) => s.updateLimits);
 
   if (!open) return null;
 
@@ -112,16 +116,34 @@ export default function Settings() {
               <dl className="kv">
                 <dt>Mémoire du moteur</dt>
                 <dd>{Math.round((info.memory?.rss || 0) / 1e6)} Mo</dd>
-                <dt>Volume de sélection maximal</dt>
-                <dd>{(info.limits?.maxSelectionVolume || 0).toLocaleString('fr-FR')} blocs</dd>
-                <dt>Budget d’aperçu</dt>
-                <dd>{(info.limits?.previewMaxBlocks || 0).toLocaleString('fr-FR')} blocs</dd>
-                <dt>Profondeur d’annulation</dt>
-                <dd>{info.limits?.maxUndo}</dd>
                 <dt>Données</dt>
                 <dd className="kv-path" title={info.dataRoot}>{info.dataRoot}</dd>
               </dl>
             )}
+          </Section>
+
+          <Section icon={<Boxes size={12} />} title="Plafonds du moteur">
+            <p className="hint" style={{ marginTop: 0 }}>
+              Ce que la machine peut encaisser. Les relever permet de travailler
+              plus grand ; trop haut, une opération peut épuiser la mémoire.
+            </p>
+            {limits && limitRanges
+              ? Object.entries(limitRanges).map(([key, range]) => (
+                <LimitField
+                  key={key}
+                  id={`lim-${key}`}
+                  limitKey={key}
+                  range={range}
+                  value={limits[key]}
+                  onCommit={(v) => updateLimits({ [key]: v })}
+                />
+              ))
+              : <p className="hint">Plafonds indisponibles : le moteur n’a pas répondu.</p>}
+            <p className="hint">
+              La hauteur du monde ({info?.limits?.worldMinY ?? -64} à{' '}
+              {info?.limits?.worldMaxY ?? 319}) n’est pas réglable : c’est celle
+              de Minecraft, pas une préférence.
+            </p>
           </Section>
         </div>
 
@@ -137,6 +159,51 @@ export default function Settings() {
           <button className="btn" data-variant="primary" onClick={close}>Fermer</button>
         </footer>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Un plafond, saisi au clavier et validé à la sortie du champ.
+ *
+ * Le moteur BORNE ce qu'on lui envoie et rend la valeur retenue : on réaffiche
+ * la sienne, pas celle qui a été tapée. Afficher la saisie ferait croire qu'un
+ * réglage hors bornes a pris.
+ */
+function LimitField({ id, limitKey, range, value, onCommit }) {
+  // Groupé par milliers à l'AFFICHAGE seulement : reformater à chaque frappe
+  // déplacerait le curseur sous les doigts.
+  const show = (v) => (Number.isFinite(Number(v)) ? Number(v).toLocaleString('fr-FR') : '');
+  const [draft, setDraft] = useState(() => show(value));
+  useEffect(() => { setDraft(show(value)); }, [value]);
+
+  const commit = async () => {
+    const n = Number(draft.replace(/[\s\u202f\u00a0]/g, ''));
+    if (!Number.isFinite(n) || draft.trim() === '') { setDraft(show(value)); return; }
+    const applied = await onCommit(n);
+    // Toujours réafficher la valeur RETENUE, même quand elle n'a pas changé :
+    // saisir dix fois le plafond ne doit pas laisser le champ mentir.
+    setDraft(show(applied?.[limitKey] ?? value));
+  };
+
+  return (
+    <div className="field">
+      <label htmlFor={id}>
+        {range.label}
+        <span className="field-value">{range.unit}</span>
+      </label>
+      <input
+        id={id}
+        className="input"
+        value={draft}
+        inputMode="numeric"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+      />
+      <p className="hint" style={{ margin: '3px 0 0' }}>
+        de {range.min.toLocaleString('fr-FR')} à {range.max.toLocaleString('fr-FR')}
+      </p>
     </div>
   );
 }

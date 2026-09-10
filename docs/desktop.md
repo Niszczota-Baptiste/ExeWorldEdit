@@ -266,6 +266,7 @@ d'apparence qu'on ne voit qu'après avoir fermé la fenêtre se règle à l'aveu
 | `uiScale` | multiplie la densité de la coquille (barres, rail, boutons, champs) | 0,85 → 1,5 |
 | `accent` | `--accent` et ses quatre nuances dérivées | tout `#RRGGBB` |
 | `perf` | affiche le relevé des opérations | oui / non |
+| `limits` | plafonds du moteur (voir plus bas) | par plafond |
 
 ### Tout passe par des variables CSS
 
@@ -291,6 +292,39 @@ ne voit pas à l'œil :
 L'or de la sélection (`--select`) n'est **pas** réglable : c'est un code de
 lecture partagé par le viewport, la pastille d'onglet et la barre d'état, pas
 une décoration.
+
+### Les plafonds du moteur
+
+`DEFAULT_LIMITS` (`staging/geometry.js`) n'était réglable que dans le code. Les
+cinq plafonds qui dépendent de la machine sont maintenant dans le panneau :
+volume de sélection, budget d'aperçu, extraction de zone, baguette magique,
+profondeur d'annulation.
+
+**`worldMinY` et `worldMaxY` n'y sont pas.** Ce ne sont pas des préférences mais
+la hauteur du monde Minecraft : les rendre réglables laisserait écrire hors du
+monde et produirait des régions qu'aucun jeu ne relirait. `normalizeLimits` les
+remet depuis `DEFAULT_LIMITS` quoi qu'on lui passe — un `settings.json` bricolé
+à la main ne peut pas les déplacer, et un test l'exige.
+
+Trois décisions valent d'être notées :
+
+- **Le bornage est à la frontière des réglages, pas dans le constructeur.**
+  `createStaging(adapter, options)` reçoit ses plafonds du CODE : un test qui
+  demande un budget d'aperçu de dix blocs pour vérifier la troncature doit
+  obtenir dix. C'est `setLimits` — l'entrée humaine — qui borne. Les tests
+  existants ont attrapé l'erreur inverse dès le premier jet.
+- **Un plafond prend effet tout de suite.** `limits` est muté en place et tous
+  les appels lisent `limits.x` au moment de l'appel : pas de staging à
+  reconstruire, donc pas de cache d'aperçu perdu. Le relire au prochain
+  démarrage ferait croire que le réglage n'a pas marché.
+- **Les BORNES viennent du moteur**, transportées par `getSettings`. L'interface
+  génère ses champs depuis elles, comme l'inspecteur génère les siens depuis les
+  descripteurs d'opérations. Les redéclarer côté renderer les ferait diverger —
+  et importerait le moteur entier dans le bundle.
+
+Le champ réaffiche toujours la valeur **retenue par le moteur**, jamais celle
+qui a été tapée : saisir dix fois le plafond ne doit pas laisser croire que
+c'est passé.
 
 ### Le relevé des opérations
 

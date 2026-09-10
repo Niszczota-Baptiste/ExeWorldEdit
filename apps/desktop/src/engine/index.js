@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { FsAdapter, defaultRoot } from '@titi/we-engine/storage';
 import {
   createStaging, createLibrary, buildExtent, buildLimits,
-  schematicToRegions, volumeToSchematic,
+  schematicToRegions, volumeToSchematic, normalizeLimits, LIMIT_RANGES,
 } from '@titi/we-engine/staging';
 import { regionCoordsFromName } from '@titi/we-engine/anvil';
 import {
@@ -23,7 +23,9 @@ import { schematicToSponge, schematicToLitematic } from '@titi/we-engine/worlded
 
 const root = process.env.TITI_DATA_ROOT || defaultRoot();
 const adapter = new FsAdapter({ root });
-const staging = createStaging(adapter);
+// Les plafonds viennent des réglages — bornés, parce qu'ils sortent d'un
+// fichier que l'utilisateur peut éditer à la main.
+const staging = createStaging(adapter, normalizeLimits(adapter.readSettings().limits));
 const library = createLibrary(adapter);
 
 /** Presse-papier par session, en mémoire — il ne survit pas à la fermeture. */
@@ -356,10 +358,24 @@ const methods = {
   // renderer : celui-ci est effacé par un vidage de cache, et un réglage perdu
   // à chaque mise à jour n'est pas un réglage.
 
-  getSettings: () => adapter.readSettings(),
+  // Les BORNES voyagent avec les réglages : l'interface génère ses champs
+  // depuis elles, comme l'inspecteur génère les siens depuis les descripteurs
+  // d'opérations. Les redéclarer côté renderer les ferait diverger, et
+  // importerait le moteur entier dans le bundle.
+  getSettings: () => ({
+    ...adapter.readSettings(),
+    limits: { ...staging.limits },
+    limitRanges: LIMIT_RANGES,
+  }),
 
   /** Fusion, pas remplacement : l'interface n'envoie que ce qu'elle change. */
-  saveSettings: ({ patch }) => adapter.writeSettings(patch || {}),
+  saveSettings: ({ patch }) => {
+    const next = adapter.writeSettings(patch || {});
+    // Les plafonds prennent effet TOUT DE SUITE : les relire au prochain
+    // démarrage ferait croire que le réglage n'a pas marché.
+    if (patch && patch.limits) next.limits = staging.setLimits(patch.limits);
+    return { ...next, limits: { ...staging.limits } };
+  },
 
   // ── Diagnostic ────────────────────────────────────────────────────────────
 

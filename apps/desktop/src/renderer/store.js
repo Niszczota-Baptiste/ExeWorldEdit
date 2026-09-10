@@ -55,6 +55,10 @@ export const useApp = create((set, get) => ({
   /** Relevés par phase des dernières opérations, plus récent en tête. */
   perfLog: [],
   engineInfo: null,
+  // Plafonds du moteur et leurs bornes. Séparés de `settings` : ceux-là sont
+  // l'affaire du moteur, `normalizeSettings` (theme.js) ne les connaît pas.
+  limits: null,
+  limitRanges: null,
 
   project: () => get().projects.find((p) => p.id === get().activeId) || null,
 
@@ -105,7 +109,9 @@ export const useApp = create((set, get) => ({
   async loadSettings() {
     let settings = DEFAULT_SETTINGS;
     try {
-      settings = normalizeSettings(await api().engine.getSettings());
+      const raw = await api().engine.getSettings();
+      settings = normalizeSettings(raw);
+      set({ limits: raw.limits || null, limitRanges: raw.limitRanges || null });
     } catch { /* premier lancement, ou moteur pas encore prêt */ }
     applyTheme(settings);
     set({ settings });
@@ -130,6 +136,22 @@ export const useApp = create((set, get) => ({
   },
 
   resetSettings() { return get().updateSettings(DEFAULT_SETTINGS); },
+
+  /**
+   * Change un plafond du moteur. C'est LUI qui borne et qui rend la valeur
+   * retenue : l'afficher telle qu'elle a été saisie ferait croire qu'un
+   * réglage hors bornes a pris.
+   */
+  async updateLimits(patch) {
+    try {
+      const next = await api().engine.saveSettings({ patch: { limits: { ...get().limits, ...patch } } });
+      set({ limits: next.limits });
+      return next.limits;
+    } catch (e) {
+      get().say(errorText(e, 'réglage des plafonds'));
+      return get().limits;
+    }
+  },
 
   // ── Relevés de performance ────────────────────────────────────────────────
 
