@@ -18,7 +18,7 @@
     "./assets/*": "./assets/*"
   },
   "scripts": {
-    "test": "node --test 'test/*.test.js'",
+    "test": "node --test \"test/*.test.js\"",
     "bench": "node bench/run.js"
   },
   "dependencies": {

@@ -132,7 +132,6 @@ export function worldOverview(info) {
 
   const regions = listRegions(info.regionDir).map((r) => {
     let bytes = 0;
-    // eslint-disable-next-line security/detect-non-literal-fs-filename -- nom validé par REGION_FILE_RE
     try { bytes = fs.statSync(path.join(info.regionDir, r.file)).size; } catch { /* disparue entre-temps */ }
     return {
       regionX: r.regionX, regionZ: r.regionZ, bytes,
@@ -169,7 +168,6 @@ export function selectRegions(info, wanted) {
 export function readRegions(info, wanted) {
   return selectRegions(info, wanted).map((r) => ({
     regionX: r.regionX, regionZ: r.regionZ,
-    // eslint-disable-next-line security/detect-non-literal-fs-filename -- nom reconstruit depuis des entiers
     buffer: fs.readFileSync(path.join(info.regionDir, regionFileName(r.regionX, r.regionZ))),
   }));
 }

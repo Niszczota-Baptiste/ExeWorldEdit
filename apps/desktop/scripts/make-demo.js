@@ -1,3 +1,6 @@
+/* eslint-disable security/detect-non-literal-fs-filename --
+   Script de développement : la racine vient de la ligne de commande, et tout
+   le reste est joint dessus à partir de noms constants. Rien d'exposé. */
 // Fabrique un build de démonstration DANS l'espace de données de l'application.
 //
 // Tout passe par le moteur, sans raccourci : régions vierges, puis les vraies

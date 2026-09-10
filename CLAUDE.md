@@ -166,6 +166,13 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   donnée qui arrive plus tard va dans un effet.
 - **Une grille en `1fr` s'étire.** La carte des régions doit garder ses
   proportions de monde : colonnes à taille fixe, jamais `1fr`.
+- **Des guillemets simples dans un script npm ne survivent pas à Windows.**
+  `node --test 'test/*.test.js'` marchait sous bash et rendait **zéro test** sous
+  PowerShell — en sortant en SUCCÈS. cmd ne retire pas les apostrophes : Node
+  cherchait un fichier nommé `'test/*.test.js'`, guillemets compris. Double
+  guillemets partout : Node 22 développe le motif lui-même, donc la même
+  commande marche des deux côtés. Windows est la cible : tout script doit être
+  écrit pour cmd.
 - **Le contenu d'un coffre n'est pas dans la grille de blocs.** Les block
   entities sont une liste à part, avec leurs coordonnées MONDE. Toute opération
   qui déplace ou efface des blocs doit les suivre — sinon un build pivoté

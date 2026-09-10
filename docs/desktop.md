@@ -705,6 +705,45 @@ touchées.
 
 ---
 
+## Portabilité Windows et dépendances
+
+### `npm test` ne testait rien sous Windows
+
+Le script était `node --test 'test/*.test.js'`. Sous bash, le shell retire les
+apostrophes et développe le motif. Sous PowerShell et cmd, **rien de tout ça** :
+Node recevait une chaîne contenant les apostrophes et cherchait un fichier
+littéralement nommé `'test/*.test.js'`. Il n'en trouvait aucun, annonçait
+`tests 0`, et **sortait en succès**.
+
+C'est le pire genre de défaut : la vérification passait au vert en ne
+vérifiant rien, sur la plateforme même que l'application vise.
+
+Le correctif est un guillemet : `node --test "test/*.test.js"`. Les deux shells
+retirent les guillemets doubles, Node reçoit le motif brut, et **Node 22 le
+développe lui-même**. La même commande marche des deux côtés.
+
+### Dépendances : ce qui compte et ce qui ne compte pas
+
+`npm audit` annonçait 14 vulnérabilités (13 hautes, 1 critique). Elles se
+séparent en deux groupes qu'il ne faut pas confondre :
+
+| | |
+|---|---|
+| `electron` | **embarqué dans l'exe**. La version 33 accusait des dizaines de correctifs manquants, dont plusieurs visent notre architecture : contournement de l'isolation de contexte via `Function.prototype.bind`, `contextBridge` qui honore les setters de prototype, et lecture inter-origine sur un protocole personnalisé `supportFetchAPI` sans `corsEnabled` — c'est exactement notre `app://`. |
+| `tar`, `extract-zip`, `electron-builder` | build seulement. Ils tournent pendant `npm run dist` et ne sont jamais livrés. |
+
+Electron 33 → 44 et electron-builder 25 → 26 : **0 vulnérabilité**, et 174
+paquets en moins dans l'arbre. L'application a été rebâtie et lancée sans écran
+pour vérifier : même rendu, mêmes 385 appels de dessin, même palette. Aucune
+API cassée — `utilityProcess`, `protocol.handle` et `titleBarOverlay` sont
+stables depuis longtemps.
+
+Le `lint` est aussi revenu à zéro problème : deux directives `eslint-disable` en
+ligne faisaient doublon avec celle en tête de `save.js`, et `make-demo.js` a
+reçu la sienne, motivée. Un avertissement qui traîne en cache un vrai.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
