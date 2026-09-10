@@ -1,0 +1,103 @@
+{
+  "takenAt": "2026-09-10T15:52:18.325Z",
+  "machine": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "node": "22.22.2",
+  "results": {
+    "set-10M": {
+      "ms": 6590.1014,
+      "peakMb": 159.44921875,
+      "n": 10485760,
+      "unit": "blocs"
+    },
+    "replace": {
+      "ms": 2091.651749,
+      "peakMb": 138.0078125,
+      "n": 3538944,
+      "unit": "blocs"
+    },
+    "mix": {
+      "ms": 2773.191961,
+      "peakMb": 459.24609375,
+      "n": 3538944,
+      "unit": "blocs"
+    },
+    "mirror-rotate": {
+      "ms": 9312.100865,
+      "peakMb": 1020.234375,
+      "n": 7077888,
+      "unit": "blocs"
+    },
+    "terrain-1024": {
+      "ms": 42043.146872,
+      "peakMb": 1067.47265625,
+      "n": 1048576,
+      "unit": "colonnes"
+    },
+    "naturalize": {
+      "ms": 2253.808668,
+      "peakMb": 158.875,
+      "n": 65536,
+      "unit": "colonnes"
+    },
+    "region-decode": {
+      "ms": 3501.784224,
+      "peakMb": 335.140625,
+      "n": 12288,
+      "unit": "sections"
+    },
+    "region-write": {
+      "ms": 857.483997,
+      "peakMb": 469.296875,
+      "n": 1024,
+      "unit": "chunks"
+    },
+    "export-mca": {
+      "ms": 4.420532,
+      "peakMb": 322.46875,
+      "n": 1,
+      "unit": "régions"
+    },
+    "export-schem": {
+      "ms": 340.273597,
+      "peakMb": 183.13671875,
+      "n": 1048576,
+      "unit": "blocs"
+    },
+    "phase-inflate": {
+      "ms": 100.731591,
+      "peakMb": 342.0390625,
+      "n": 1024,
+      "unit": "chunks"
+    },
+    "phase-nbt-parse": {
+      "ms": 346.496113,
+      "peakMb": 357.0078125,
+      "n": 1024,
+      "unit": "chunks"
+    },
+    "phase-nbt-simplify": {
+      "ms": 40.623038,
+      "peakMb": 456.89453125,
+      "n": 1024,
+      "unit": "chunks"
+    },
+    "phase-unpack-sections": {
+      "ms": 2585.105842,
+      "peakMb": 461.3359375,
+      "n": 12288,
+      "unit": "sections"
+    },
+    "store-setblock": {
+      "ms": 1065.512895,
+      "peakMb": 99.609375,
+      "n": 1048576,
+      "unit": "blocs"
+    },
+    "store-getblock": {
+      "ms": 141.258667,
+      "peakMb": 97.8984375,
+      "n": 1048576,
+      "unit": "blocs"
+    }
+  }
+}

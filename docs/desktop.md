@@ -299,17 +299,47 @@ chunk), qui est une propriété du maillage et pas du matériel.
 La cible de 60 images par seconde sur 20 M de blocs se vérifiera sur une vraie
 machine, à la phase 2.7.
 
-### Piste principale pour la phase 1.1
+### Phase 1.1 : la mesure a contredit l'intuition
 
-`decodeChunk` passe par `prismarine-nbt` (`nbt.parse` + `nbt.simplify`), une
-implémentation générique fondée sur protodef, très allocatoire. Sur un
-chargement de région complète, le NBT domine probablement le dépack des
-sections — donc avant d'optimiser `RegionStore`, **mesurer où part réellement le
-temps**. Si c'est confirmé, écrire un lecteur/écrivain NBT dédié (quelques
-centaines de lignes de binaire direct, sortie en vues typées, sans `simplify`)
-est vraisemblablement le plus gros gain du chantier. Ce n'est pas réécrire le
-moteur dans un autre langage : c'est remplacer une dépendance sur le chemin
-chaud.
+J'avais annoncé que `prismarine-nbt` dominerait le chargement d'une région et
+qu'il faudrait sans doute le remplacer. **C'était faux.** Le bench a montré :
+
+| Étape | Avant | Part |
+|---|---|---|
+| inflate | 101 ms | 3 % |
+| `nbt.parse` | 346 ms | 11 % |
+| `nbt.simplify` | 41 ms | 1 % |
+| `readSection` | 2585 ms | **85 %** |
+
+Le coût était dans notre propre code : `decodeBlockStates` allouait **un BigInt
+par bloc** pour extraire un index de palette. Une région pleine, c'est 12 288
+sections × 4096 blocs.
+
+Le format 1.16+ ne fait jamais chevaucher un index sur deux longs et un index
+tient sur 12 bits au plus : tout se lit en arithmétique 32 bits. Résultat
+mesuré, médiane de 3 :
+
+- dépack de sections : **× 10,7**
+- chargement d'une région complète : **× 4,2** (3502 → 841 ms)
+
+La réécriture est jugée par `test/section-unpack.test.js`, qui compare sa sortie
+à l'implémentation BigInt d'origine sur les onze largeurs de palette. Une
+manipulation de bits ne se relit pas, elle se compare.
+
+Maintenant que le dépack ne coûte plus rien, le NBT est effectivement devenu le
+premier poste (50 % du chargement) — mais c'est la mesure qui l'a établi, pas
+l'intuition, et l'ordre des deux n'est pas un détail : remplacer le NBT d'abord
+aurait été optimiser 12 % en laissant 85 %.
+
+### Le seuil de régression en intégration continue
+
+Le cahier des charges demande de signaler une régression de plus de 20 %.
+Mesuré ici : à **code identique**, `mirror-rotate` est passé de 9,3 s à 11,0 s
+entre deux exécutions — 18 % d'écart pour rien. Un seuil à 20 % sur une machine
+partagée déclenche sur du bruit, et une garde qui crie au loup finit désactivée.
+
+Le lanceur prend donc la **médiane** de N exécutions (`--repeat=3`) et n'annonce
+un écart qu'au-delà de 25 %.
 
 ---
 
@@ -360,7 +390,9 @@ jetable sans toucher au vrai.
 | 2.4 | Disposition (panneaux, inspecteur généré, palette virtualisée) | fait pour l'essentiel ; `Ctrl+K` et thème clair à venir |
 | 2.5 | Viewport | maillage par chunk + AO **fait** ; atlas de textures et modèles non cubiques à venir |
 | 2.6 | Empaquetage | configuration electron-builder écrite, jamais exécutée sur Windows |
-| 1 | Moteur rapide et entités | à venir |
+| 1.1 | Mesurer | **fait** — `bench/`, 16 scénarios, `RESULTS.md` |
+| 1.2 | Moteur rapide | dépack de sections **× 10,7** ; reste : `RegionStore` en tableaux typés, pool de workers, plafonds réglables |
+| 1.3 | Entités | à venir |
 | 3 | Brushs | à venir |
 | 4 | Tracés, PNJ, dispersion | à venir |
 | 5 | Outils de génération | à venir |

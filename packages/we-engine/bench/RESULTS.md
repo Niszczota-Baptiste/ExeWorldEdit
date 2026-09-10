@@ -1,6 +1,7 @@
-# Bench du moteur — mesures AVANT optimisation
+# Bench du moteur
 
 Généré par `npm run bench` le 2026-09-10.
+Deux colonnes de temps : la référence figée, et la mesure du jour.
 
 ## Comment lire ces chiffres
 
@@ -15,85 +16,94 @@ décomposition du chargement : ils tiennent quelle que soit la machine.
 
 Machine : Intel(R) Xeon(R) Processor @ 2.10GHz, 4 cœurs, 16 Go, Node 22.22.2.
 
+La colonne « Avant » vient de `bench/baseline.json`, mesuré le 2026-09-10 sur la même machine.
+
 ## Opérations
 
-| Scénario | Temps | Pic mémoire | Débit | Sortie |
-|---|---|---|---|---|
-| `set-10M` | 6391 ms | 160 Mo | 1.6 M/s blocs |  |
-| `replace` | 2068 ms | 139 Mo | 1.7 M/s blocs |  |
-| `mix` | 2730 ms | 457 Mo | 1.3 M/s blocs |  |
-| `mirror-rotate` | 10.1 s | 1013 Mo | 701 k/s blocs |  |
-| `terrain-1024` | 39.0 s | 1068 Mo | 27 k/s colonnes |  |
-| `naturalize` | 2111 ms | 161 Mo | 31 k/s colonnes |  |
+| Scénario | Avant | Après | Pic mémoire | Débit | Gain |
+|---|---|---|---|---|---|
+| `set-10M` | 6590 ms | 6121 ms | 158 Mo | 1.7 M/s blocs | dans le bruit |
+| `replace` | 2092 ms | 2081 ms | 138 Mo | 1.7 M/s blocs | dans le bruit |
+| `mix` | 2773 ms | 2695 ms | 458 Mo | 1.3 M/s blocs | dans le bruit |
+| `mirror-rotate` | 9312 ms | 8422 ms | 1025 Mo | 840 k/s blocs | dans le bruit |
+| `terrain-1024` | 42.0 s | 38.6 s | 1072 Mo | 27 k/s colonnes | dans le bruit |
+| `naturalize` | 2254 ms | 2102 ms | 160 Mo | 31 k/s colonnes | dans le bruit |
 
 ## Entrées / sorties
 
-| Scénario | Temps | Pic mémoire | Débit | Sortie |
-|---|---|---|---|---|
-| `region-decode` | 3433 ms | 333 Mo | 4 k/s sections | 5.0 Mo |
-| `region-write` | 871 ms | 462 Mo | 1 k/s chunks | 5.0 Mo |
-| `export-mca` | 5 ms | 323 Mo | 214/s régions | 5.0 Mo |
-| `export-schem` | 355 ms | 184 Mo | 3.0 M/s blocs | 0.0 Mo |
+| Scénario | Avant | Après | Pic mémoire | Débit | Gain |
+|---|---|---|---|---|---|
+| `region-decode` | 3502 ms | 884 ms | 331 Mo | 14 k/s sections | **× 4.0 plus rapide** |
+| `region-write` | 857 ms | 888 ms | 466 Mo | 1 k/s chunks | dans le bruit |
+| `export-mca` | 4 ms | 5 ms | 325 Mo | 208/s régions | dans le bruit |
+| `export-schem` | 340 ms | 351 ms | 184 Mo | 3.0 M/s blocs | dans le bruit |
 
 ## Décomposition du chargement d’une région
 
-| Scénario | Temps | Pic mémoire | Débit | Sortie |
-|---|---|---|---|---|
-| `phase-inflate` | 91 ms | 346 Mo | 11 k/s chunks |  |
-| `phase-nbt-parse` | 340 ms | 356 Mo | 3 k/s chunks |  |
-| `phase-nbt-simplify` | 39 ms | 461 Mo | 26 k/s chunks |  |
-| `phase-unpack-sections` | 2619 ms | 461 Mo | 5 k/s sections |  |
+| Scénario | Avant | Après | Pic mémoire | Débit | Gain |
+|---|---|---|---|---|---|
+| `phase-inflate` | 101 ms | 97 ms | 343 Mo | 11 k/s chunks | dans le bruit |
+| `phase-nbt-parse` | 346 ms | 383 ms | 356 Mo | 3 k/s chunks | dans le bruit |
+| `phase-nbt-simplify` | 41 ms | 43 ms | 456 Mo | 24 k/s chunks | dans le bruit |
+| `phase-unpack-sections` | 2585 ms | 243 ms | 463 Mo | 50 k/s sections | **× 10.6 plus rapide** |
 
 ## Chemin chaud de RegionStore
 
-| Scénario | Temps | Pic mémoire | Débit | Sortie |
-|---|---|---|---|---|
-| `store-setblock` | 1034 ms | 97 Mo | 1.0 M/s blocs |  |
-| `store-getblock` | 136 ms | 98 Mo | 7.7 M/s blocs |  |
+| Scénario | Avant | Après | Pic mémoire | Débit | Gain |
+|---|---|---|---|---|---|
+| `store-setblock` | 1066 ms | 1044 ms | 98 Mo | 1.0 M/s blocs | dans le bruit |
+| `store-getblock` | 141 ms | 146 ms | 98 Mo | 7.2 M/s blocs | dans le bruit |
 
 ## Où part le temps au chargement
 
-Décoder une région pleine (1024 chunks, 12288 sections) prend **3433 ms**.
+Décoder une région pleine (1024 chunks, 12288 sections) prend **884 ms**.
 Répartition mesurée :
 
 | Étape | Temps | Part |
 |---|---|---|
-| `inflate` | 91 ms | 3 % |
-| `nbt-parse` | 340 ms | 11 % |
-| `nbt-simplify` | 39 ms | 1 % |
-| `unpack-sections` | 2619 ms | 85 % |
+| `inflate` | 97 ms | 13 % |
+| `nbt-parse` | 383 ms | 50 % |
+| `nbt-simplify` | 43 ms | 6 % |
+| `unpack-sections` | 243 ms | 32 % |
 
 (La somme des étapes ne retombe pas exactement sur le total : chacune
 réalloue de son côté. Ce sont les **proportions** qui comptent.)
 
-## Ce que la décomposition apprend
+## Ce que la mesure a appris
 
-**Mon hypothèse de départ était fausse.** J'attendais que `prismarine-nbt`
-domine le chargement d'une région, et j'ai annoncé qu'il faudrait probablement
-le remplacer. La mesure dit l'inverse : le NBT (parse + simplify) pèse 12 %,
-l'inflate 3 %, et **85 % du temps part dans `readSection`** — le dépack des
-palettes et des tableaux de bits, c'est-à-dire notre propre code.
+**L’hypothèse de départ était fausse.** J’attendais que `prismarine-nbt`
+domine le chargement d’une région, et j’avais annoncé qu’il faudrait sans
+doute le remplacer. La décomposition dit l’inverse : avant optimisation, le
+NBT pesait 12 %, l’inflate 3 %, et **85 % du temps partait dans
+`readSection`** — notre propre dépack de sections.
 
-La cause est dans `decodeBlockStates` (`src/anvil/section.js`) :
+La cause était dans `decodeBlockStates` (`src/anvil/section.js`) : la boucle
+allouait **un BigInt par bloc** pour extraire un index de palette. Sur une
+région pleine — 12 288 sections × 4096 blocs — cela fait une cinquantaine de
+millions d’itérations à plusieurs allocations chacune.
 
-```js
-const longs = data.map(pairToBig);            // un BigInt par long
-for (let n = 0; n < SECTION_VOLUME; n++) {
-  indices[n] = Number((longs[li] >> BigInt(within * bits)) & mask);
-  //                                ^^^^^^^^^^^^^^^^^^^^  un BigInt de plus, PAR BLOC
-}
-```
+Le format 1.16+ ne fait jamais chevaucher un index sur deux longs, et un
+index tient sur 12 bits au plus. Tout se lit donc en arithmétique 32 bits
+ordinaire. La réécriture est couverte par `test/section-unpack.test.js`, qui
+compare la sortie à l’implémentation BigInt d’origine sur les onze largeurs
+de palette : une manipulation de bits ne se relit pas, elle se compare.
 
-Une région pleine fait 12 288 sections × 4096 blocs, soit ~50 M d'itérations,
-chacune allouant plusieurs BigInt. Les opérations BigInt sont un ordre de
-grandeur plus lentes que l'arithmétique sur `Number` et allouent sur le tas.
+Remplacer `prismarine-nbt` aurait été optimiser les 12 % en laissant les
+85 %. Maintenant que le dépack ne coûte plus rien, le NBT est effectivement
+devenu le premier poste du chargement — mais c’est la mesure qui l’a établi,
+pas l’intuition.
 
-C'est une bonne nouvelle : le format 1.16+ ne fait pas chevaucher un index sur
-deux longs, et un index tient sur 12 bits au plus. Tout se lit donc en
-arithmétique 32 bits ordinaire, sans jamais construire un BigInt.
+## Sur le seuil de régression en intégration continue
 
-Remplacer `prismarine-nbt` reste envisageable un jour, mais ce n'est clairement
-pas là qu'est le gain : ce serait optimiser les 12 % en laissant les 85 %.
+Le cahier des charges demande de signaler une régression de plus de 20 %.
+Mesuré ici : à **code identique**, `mirror-rotate` est passé de 9,3 s à
+11,0 s entre deux exécutions, soit 18 % d’écart pour rien. Un seuil à 20 %
+sur une machine partagée déclencherait sur du bruit, et une garde qui crie au
+loup finit désactivée.
+
+D’où deux protections dans le lanceur : `--repeat=3` prend la **médiane**
+(pas la moyenne, qu’un seul tour lent suffit à fausser), et tout écart de
+moins de 25 % s’affiche « dans le bruit » plutôt que comme un résultat.
 
 ## Ce que ces chiffres n’incluent pas
 

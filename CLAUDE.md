@@ -65,14 +65,22 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (176 tests aujourd'hui)
+npm test          # tous les paquets (191 tests aujourd'hui)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
 npm run start --workspace @titi/desktop   # build puis lancement
 npm run dist  --workspace @titi/desktop   # installeur Windows
 npm run demo  --workspace @titi/desktop -- <dossier>   # build de démonstration
+
+npm run bench --workspace @titi/we-engine                 # médiane de 1
+npm run bench --workspace @titi/we-engine -- --repeat=3   # médiane de 3
+npm run bench --workspace @titi/we-engine -- --save-baseline   # refiger la référence
 ```
+
+Le bench compare à `bench/baseline.json` et écrit `bench/RESULTS.md`. Ne refiger
+la référence QUE délibérément : c'est le point de comparaison de tout ce qui
+suit.
 
 Sans écran (session distante, intégration continue) :
 `TITI_SCREENSHOT=/tmp/x.png xvfb-run -a npx electron .` rend la fenêtre en
@@ -109,6 +117,13 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
 
 ## Pièges déjà rencontrés
 
+- **Optimiser sans mesurer.** J'ai annoncé que `prismarine-nbt` dominerait le
+  chargement d'une région. Faux : il pesait 12 %, et 85 % partaient dans notre
+  propre dépack de sections, qui allouait un BigInt par bloc. Le bench de la
+  phase 1.1 existe pour que la 1.2 ne se trompe pas de cible.
+- **Un seuil de régression à 20 % crie au loup.** Mesuré : à code identique,
+  `mirror-rotate` a bougé de 18 % entre deux exécutions. Le bench prend la
+  médiane de N et n'annonce un écart qu'au-delà de 25 %.
 - **Assainir un identifiant au lieu de le refuser.** `a/b` et `a b` deviennent
   tous deux `a_b` : deux projets distincts dans le même dossier, donc une perte
   de données silencieuse. `FsAdapter` valide et refuse.
