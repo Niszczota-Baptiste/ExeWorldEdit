@@ -10,6 +10,7 @@ import {
 } from '../anvil/index.js';
 import { extractMcaEntries } from '../worldedit/zipReader.js';
 import { RegionStore } from '../worldedit/regionStore.js';
+import { runColumnLocal, shouldParallelize } from '../worldedit/regionPool.js';
 import {
   opMirror, opMirrorCopy, opRotate, opTranslate, opReplace, opSet, opCopy, opPaste, opCut,
   opWalls, opFaces, opHollow, opOverlay, opNaturalize, opStack, opSphere, opCyl, opSmooth, opScale, opMix,
@@ -240,7 +241,7 @@ export function createStaging(adapter, options = {}) {
    * du contenu existant (construire au-dessus, stack qui déborde), bornée aux
    * limites du monde, et l'aperçu couvre la nouvelle emprise.
    */
-  function growAndPreview(project, store, sel, resultBounds) {
+  async function growAndPreview(project, store, sel, resultBounds) {
     const grown = clampBBox(unionBBox(buildExtent(project), resultBounds || sel), editLimits(project));
     adapter.saveExtent(project.id, grown);
 
@@ -256,6 +257,11 @@ export function createStaging(adapter, options = {}) {
     const dirty = clampBBox(unionBBox(sel, resultBounds || sel), grown);
     const base = readPreview(project.id);
     if (base) {
+      // Le store doit être chaud sur ce qu'on va parcourir. Il l'est déjà quand
+      // l'opération vient de s'en servir, mais pas après le chemin parallèle,
+      // où les fils ont travaillé sur des copies et où celui-ci sort du disque.
+      // `warmup` saute ce qui est déjà décodé : le rappeler ne coûte rien.
+      await store.warmup(dirty);
       const patch = store.deriveSparse(dirty, limits.previewMaxBlocks, { truncate: true });
       const spliced = splicePreview({ base, patch, dirty, extent: grown, maxBlocks: limits.previewMaxBlocks });
       // `null` = le recollage ne peut rien garantir (source tronquée, budget
@@ -264,6 +270,7 @@ export function createStaging(adapter, options = {}) {
     }
 
     // Aperçu PARTIEL au-delà du budget : la commande, elle, a tout écrit.
+    await store.warmup(grown);
     const sparse = store.deriveSparse(grown, limits.previewMaxBlocks, { truncate: true });
     writePreview(project.id, sparse);
     return sparse;
@@ -325,6 +332,52 @@ export function createStaging(adapter, options = {}) {
   }
 
   /**
+   * Même contrat qu'`applyOperation`, mais chaque région part dans son fil.
+   *
+   * Réservé aux opérations COLONNE-LOCALES (`COLUMN_LOCAL_OPS`) : elles ne
+   * lisent jamais hors de leur propre (x, z), donc découper par région ne peut
+   * pas changer le résultat. Un test compare case par case avec le chemin
+   * série, sélection à cheval sur une frontière de région.
+   */
+  async function applyInParallel({ project, operation, params, sel, actor, timer, progress, startedAt, files }) {
+    timer.enter('load');
+    progress('load', 5);
+    const rdir = regionsDir(project.id);
+    const sources = files.map(({ file, regionX, regionZ }) => ({
+      regionX, regionZ, buffer: fs.readFileSync(path.join(rdir, file)),
+    }));
+
+    timer.enter('apply');
+    progress('apply', 30); await tick();
+    const out = await runColumnLocal({ sources, operation, params: params || {}, selection: sel });
+
+    timer.enter('commit');
+    progress('commit', 60); await tick();
+    snapshotRegions(project.id, regionKeysForBBox(unionBBox(sel, out.bounds || sel)));
+    clearRedo(project.id);
+    writeRegions(project.id, out.buffers);
+
+    timer.enter('preview');
+    progress('preview', 85); await tick();
+    // Le store est rechargé APRÈS écriture : les fils ont travaillé sur des
+    // copies, celui-ci lit ce qui est réellement sur le disque.
+    const store = loadStore(project);
+    const sparse = await growAndPreview(project, store, sel, out.bounds);
+
+    const durationMs = Date.now() - startedAt;
+    const timings = timer.finish();
+    adapter.appendAudit({
+      projectId: project.id, actor, operation,
+      params: { selection: sel, params: params || {} },
+      blocksChanged: out.blocksChanged, durationMs, timings,
+    });
+    return {
+      blocksChanged: out.blocksChanged, bounds: out.bounds || sel,
+      durationMs, previewTruncated: !!sparse.truncated, timings, parallel: true,
+    };
+  }
+
+  /**
    * Applique une opération sur le staging et renvoie le diff.
    * `onProgress(phase, pct)` est appelé entre les phases.
    */
@@ -336,6 +389,20 @@ export function createStaging(adapter, options = {}) {
     const progress = (phase, pct) => { onProgress?.(phase, pct); };
     const extent = buildExtent(project);
     const sel = checkSelection(selection, editLimits(project));
+
+    // Chemin PARALLÈLE : une région par fil, pour les opérations colonne-locales
+    // assez grosses pour que ça vaille le démarrage du pool. Les fils rendent
+    // des régions déjà réencodées ; le principal n'a plus qu'à les écrire.
+    const rfiles = listRegionFiles(project.id);
+    // Ce qui compte est le nombre de régions que la SÉLECTION traverse, pas le
+    // nombre de fichiers du projet : un build de treize régions dont on n'édite
+    // qu'un coin ne donne du travail qu'à un seul fil.
+    const touchedRegions = regionKeysForBBox(sel).size;
+    if (shouldParallelize({ operation, regionCount: touchedRegions, selection: sel })) {
+      return applyInParallel({
+        project, operation, params, sel, actor, timer, progress, startedAt, files: rfiles,
+      });
+    }
 
     timer.enter('load');
     progress('load', 5);
@@ -372,7 +439,7 @@ export function createStaging(adapter, options = {}) {
 
     timer.enter('preview');
     progress('preview', 85); await tick();
-    const sparse = growAndPreview(project, store, sel, result.bounds);
+    const sparse = await growAndPreview(project, store, sel, result.bounds);
 
     const durationMs = Date.now() - startedAt;
     const timings = timer.finish();
@@ -434,7 +501,7 @@ export function createStaging(adapter, options = {}) {
     clearRedo(project.id);
     writeRegions(project.id, store.commit({ touchedOnly: true }));
     onProgress?.('preview', 85); await tick();
-    const sparse = growAndPreview(project, store, sel, sel);
+    const sparse = await growAndPreview(project, store, sel, sel);
 
     const durationMs = Date.now() - startedAt;
     adapter.appendAudit({
@@ -483,7 +550,7 @@ export function createStaging(adapter, options = {}) {
     clearRedo(project.id);
     writeRegions(project.id, store.commit({ touchedOnly: true }));
     onProgress?.('preview', 85); await tick();
-    const sparse = growAndPreview(project, store, sel, sel);
+    const sparse = await growAndPreview(project, store, sel, sel);
 
     const durationMs = Date.now() - startedAt;
     adapter.appendAudit({
@@ -547,7 +614,7 @@ export function createStaging(adapter, options = {}) {
     clearRedo(project.id);
     writeRegions(project.id, store.commit({ touchedOnly: true }));
     onProgress?.('preview', 85); await tick();
-    const sparse = growAndPreview(project, store, sel, sel);
+    const sparse = await growAndPreview(project, store, sel, sel);
 
     const durationMs = Date.now() - startedAt;
     adapter.appendAudit({

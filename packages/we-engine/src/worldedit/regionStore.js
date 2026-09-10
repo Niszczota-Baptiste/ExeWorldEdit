@@ -186,6 +186,47 @@ export class RegionStore {
     return isAir(b) ? null : { Name: b.Name, Properties: b.Properties ? { ...b.Properties } : null };
   }
 
+  /**
+   * Y a-t-il de l'air ici ? Sans allouer.
+   *
+   * `getBlock` fabrique un objet `{ Name, Properties }` à chaque appel, et les
+   * opérations qui balaient une colonne le jettent aussitôt. Mesuré au
+   * profileur sur `terrain` : `getBlock` 34 % du temps, plus 5 % de
+   * ramasse-miettes derrière. Ces deux sondes lisent la palette en place.
+   *
+   * Hors des chunks chargés, c'est de l'air — même convention que `getBlock`,
+   * qui rend `null`.
+   */
+  isAirAt(x, y, z) {
+    const hit = this._resolve(fdiv(x, 16), fdiv(z, 16), fdiv(y, 16), false);
+    if (!hit) return true;
+    const g = hit.sec.grid;
+    return isAir(g.palette[g.indices[localIndex(fmod(x, 16), fmod(y, 16), fmod(z, 16))]]);
+  }
+
+  /**
+   * Équivalent exact de `sameBlock(getBlock(x, y, z), block)`, sans allocation.
+   * « Exact » y compris pour l'air : deux airs sont le même bloc, et un bloc
+   * absent est de l'air.
+   */
+  matchesAt(x, y, z, block) {
+    const hit = this._resolve(fdiv(x, 16), fdiv(z, 16), fdiv(y, 16), false);
+    const cur = hit
+      ? hit.sec.grid.palette[hit.sec.grid.indices[localIndex(fmod(x, 16), fmod(y, 16), fmod(z, 16))]]
+      : null;
+    const curAir = isAir(cur);
+    const wantAir = isAir(block);
+    if (curAir || wantAir) return curAir && wantAir;
+    if (cur.Name !== block.Name) return false;
+    // Même comparaison d'états que `sameBlock`, mais sur l'entrée de palette
+    // telle qu'elle est stockée — rien n'est copié.
+    const pa = cur.Properties || {}, pb = block.Properties || {};
+    const ka = Object.keys(pa);
+    if (ka.length !== Object.keys(pb).length) return false;
+    for (const k of ka) if (String(pa[k]) !== String(pb[k])) return false;
+    return true;
+  }
+
   setBlock(x, y, z, block) {
     // Hors des chunks chargés (= hors du build) : on ignore l'écriture (clamp).
     // Le warmup couvre tout le build, donc seuls les débordements stack/sphère

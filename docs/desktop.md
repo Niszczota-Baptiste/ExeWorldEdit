@@ -571,6 +571,88 @@ optimisé × 4,2 à la phase 1.2 — la suite est le parallélisme.
 
 ---
 
+## Le pool de fils
+
+Le point de départ était « `terrain-1024` prend 37,6 s sur un seul fil ». Deux
+mesures ont redressé le plan avant d'écrire une ligne de pool.
+
+### La première a supprimé les deux tiers du problème
+
+Après le travail sur le `RegionStore`, `terrain-1024` était déjà tombé à
+**10,1 s**. Et le profil ne montrait plus de coût dominant en série : le temps
+s'était réparti entre le bruit, les recherches de section, l'écriture. Le seul
+gros poste restant venait de `getBlock`, qui **allouait un objet par appel** —
+34 % du temps, plus 5 % de ramasse-miettes derrière.
+
+Deux sondes sans allocation (`isAirAt`, `matchesAt`) l'ont fait disparaître du
+profil. Elles sont OPTIONNELLES : un volume qui ne les implémente pas retombe
+sur `getBlock`, comme pour `getBiome`. `naturalize` y a gagné 21 %.
+
+### La seconde a décidé de la découpe
+
+L'idée naturelle — un fil par chunk à décoder — ne marche pas, et ça se mesure
+en trois lignes :
+
+```
+décodage de 128 chunks    60 ms
+transfert des arbres NBT  65 ms
+```
+
+Le processus principal a besoin de l'arbre NBT pour réécrire la région sans
+perte. **Le transférer coûte plus cher que le décoder** (rapport 1,08) : un fil
+qui rendrait des chunks décodés ferait perdre du temps, pas en gagner.
+
+Ce qui se transfère sans copie, c'est un `ArrayBuffer`. D'où la seule découpe
+qui paie : **un fil possède une région entière**, du décodage au réencodage, et
+ne rend que des octets.
+
+### Ce que ça interdit
+
+Découper par région sans bordure n'est juste que pour les opérations
+**colonne-locales** : celles dont chaque case ne dépend que de son propre
+(x, z).
+
+| | |
+|---|---|
+| `terrain`, `naturalize` | colonne-locales — parallélisées |
+| `smooth`, `erode`, `dilate` | lisent un voisin : verraient de l'air au bord de leur région, et produiraient une couture invisible |
+| `mirror`, `rotate`, `translate`, `stack`, `scale` | lisent ailleurs dans la sélection : découpées, elles n'ont pas de sens |
+
+`COLUMN_LOCAL_OPS` est volontairement courte, et un test la garde telle quelle.
+
+Deux détails qui rendraient le résultat faux s'ils étaient omis :
+
+- **la découpe est en X/Z, jamais en Y.** La hauteur est ce que l'utilisateur a
+  demandé, pas une propriété de la région ; la rogner changerait le relief que
+  chaque fil calcule ;
+- **le garde-fou compte les régions que la SÉLECTION traverse**, pas les
+  fichiers du projet. Un build de treize régions dont on n'édite qu'un coin ne
+  donne du travail qu'à un seul fil : le paralléliser coûterait le démarrage du
+  pool pour rien. Seuils : deux régions et un million de cases.
+
+### Résultat
+
+Terrain « collines » sur 1536 × 1536 (neuf régions, 65,4 M de blocs), pool de
+trois fils sur quatre cœurs :
+
+| | |
+|---|---|
+| série | 41 695 ms |
+| parallèle | 17 384 ms |
+| | **× 2,40** |
+
+Le nombre de blocs changés est identique au bloc près. Le test qui compte
+compare le résultat parallèle au résultat série **case par case**, avec une
+sélection à cheval sur la frontière x = 512 : c'est exactement là qu'une couture
+apparaîtrait, et elle ne se verrait pas autrement dans un build de plusieurs
+millions de blocs.
+
+Le bench mesure toujours le chemin SÉRIE (`terrain-1024` appelle `opTerrain`
+directement) : c'est voulu, il compare le moteur à lui-même. Le gain du pool se
+mesure au niveau d'`applyOperation`.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
@@ -643,7 +725,8 @@ mélangé passerait les tests de rejouabilité et produirait quand même des ban
   décalage, lui, est lossless. Phase 1.3.
 - **`getBlock` alloue un objet par appel** (`{ Name, Properties }`). Le reste du
   chemin chaud est traité (voir « Le chemin chaud du `RegionStore` »).
-- **Un seul fil d'exécution.** Pas de pool de workers. Phase 1.2.
+- **Le parallélisme ne couvre que deux opérations** (`terrain`, `naturalize`).
+  Les autres restent sur un seul fil — voir « Le pool de fils ».
 - **L'aperçu se resérialise en entier** à chaque opération, même pour un bloc
   changé. Le format binaire a ramené ce plancher de ~330 ms à ~30 ms ; le
   supprimer demanderait un aperçu découpé par chunk, donc de toucher aussi le
@@ -778,7 +861,7 @@ jetable sans toucher au vrai.
 | 2.5 | Viewport | maillage par chunk + AO **fait** ; atlas de textures et modèles non cubiques à venir |
 | 2.6 | Empaquetage | configuration electron-builder écrite, jamais exécutée sur Windows |
 | 1.1 | Mesurer | **fait** — `bench/`, 16 scénarios, `RESULTS.md` |
-| 1.2 | Moteur rapide | dépack de sections **× 10,7**, aperçu incrémental **× 3,9** (−63 % sur le total) ; reste : format d'aperçu binaire, `RegionStore` en tableaux typés, pool de workers, plafonds réglables |
+| 1.2 | Moteur rapide | **fait** — dépack de sections × 10,7, `RegionStore` (set-10M × 6,7), aperçu binaire et incrémental × 11,1 (−82 % sur le total), pool de fils × 2,4 sur `terrain`, plafonds réglables. Reste : aperçu découpé par chunk, `getBlock` sans allocation |
 | 1.3 | Entités | à venir |
 | 3 | Brushs | à venir |
 | 4 | Tracés, PNJ, dispersion | à venir |

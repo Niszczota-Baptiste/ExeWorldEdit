@@ -869,3 +869,58 @@ test('la première écriture convertit l’ancien aperçu et le retire', async (
   assert.equal(fs.existsSync(path.join(dir, 'preview.json.gz')), false,
     'deux fichiers pour la même chose finiraient par diverger');
 });
+
+// ── Chemin parallèle ────────────────────────────────────────────────────────
+
+test('une opération colonne-locale sur plusieurs régions passe par les fils, et donne le même résultat', async () => {
+  const { closePool } = await import('../src/worldedit/regionPool.js');
+  const { blankRegions } = await import('../src/staging/index.js');
+  const { RegionStore } = await import('../src/worldedit/regionStore.js');
+  const { opTerrain } = await import('../src/worldedit/transform.js');
+
+  // Deux régions, et une sélection à cheval sur leur frontière (x = 512).
+  const origin = { x: 0, y: 40, z: 0 };
+  const size = { x: 1024, y: 1, z: 128 };
+  const seed = () => blankRegions({ origin, size });
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'we-par-'));
+  roots.push(root);
+  const adapter = new FsAdapter({ root });
+  const staging = createStaging(adapter);
+  adapter.saveProject({ id: 'par', name: 'Parallèle', min: origin, size: { x: 1024, y: 81, z: 128 } });
+  staging.seedRegions('par', seed());
+
+  const selection = sel({ x: 0, y: 40, z: 0 }, { x: 1023, y: 110, z: 127 });
+  const params = { style: 'collines', amplitude: 0.7, scale: 0, seed: 7, palette: 'plains', clearAbove: true };
+
+  const res = await staging.applyOperation({
+    project: adapter.getProject('par'), operation: 'terrain', params, selection, actor: 't',
+  });
+  assert.equal(res.parallel, true, 'le chemin parallèle doit être pris ici');
+  assert.ok(res.blocksChanged > 0);
+
+  // Référence série, sur les mêmes régions vierges.
+  const ref = new RegionStore(seed());
+  await ref.warmup(selection);
+  const refRes = await opTerrain(ref, selection, params, { yield: async () => {} });
+  assert.equal(res.blocksChanged, refRes.blocksChanged, 'même nombre de blocs qu’en série');
+
+  // Et le staging sur disque doit contenir exactement le même relief.
+  const relu = staging.loadStore(adapter.getProject('par'));
+  await relu.warmup(selection);
+  for (const x of [0, 300, 511, 512, 513, 900, 1023]) {
+    for (const z of [0, 63, 127]) {
+      let hRef = null, hPar = null;
+      for (let y = selection.max.y; y >= selection.min.y; y--) {
+        if (hRef === null && ref.getBlock(x, y, z)) hRef = y;
+        if (hPar === null && relu.getBlock(x, y, z)) hPar = y;
+      }
+      assert.equal(hPar, hRef, `hauteur différente en (${x}, ${z})`);
+    }
+  }
+
+  // L'aperçu du projet doit exister et refléter le relief.
+  const aperçu = staging.readPreview('par');
+  assert.ok(aperçu.count > 0, 'l’aperçu est régénéré après le chemin parallèle');
+  await closePool();
+});

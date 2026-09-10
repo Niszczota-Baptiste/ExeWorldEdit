@@ -51,6 +51,9 @@ export class MaskedVolume {
   getBlock(x, y, z) { return this.inner.getBlock(x, y, z); }
   setBlock(x, y, z, b) { if (selectionContains(this.sel, x, y, z)) this.inner.setBlock(x, y, z, b); }
   getBiome(x, y, z) { return this.inner.getBiome ? this.inner.getBiome(x, y, z) : null; }
+  // Les sondes sans allocation traversent le masque : il ne filtre que l'ÉCRITURE.
+  isAirAt(x, y, z) { return isAirAt(this.inner, x, y, z); }
+  matchesAt(x, y, z, b) { return matchesAt(this.inner, x, y, z, b); }
   setBiome(x, y, z, n) { return (selectionContains(this.sel, x, y, z) && this.inner.setBiome) ? this.inner.setBiome(x, y, z, n) : false; }
 }
 
@@ -159,6 +162,17 @@ function fillSelection(vol, sel, block) {
   }
   return changed;
 }
+
+/**
+ * Sondes SANS ALLOCATION, quand le volume sait les faire.
+ *
+ * `getBlock` rend un objet neuf à chaque appel ; une opération qui balaie une
+ * colonne pour savoir « est-ce de l'air ? » en jette des millions. Le volume
+ * peut répondre en lisant sa palette en place — s'il ne sait pas, on retombe
+ * sur le chemin d'origine, comme pour `getBiome`.
+ */
+export const isAirAt = (vol, x, y, z) => (vol.isAirAt ? vol.isAirAt(x, y, z) : isAir(vol.getBlock(x, y, z)));
+export const matchesAt = (vol, x, y, z, b) => (vol.matchesAt ? vol.matchesAt(x, y, z, b) : sameBlock(vol.getBlock(x, y, z), b));
 
 export function sameBlock(a, b) {
   if (isAir(a) && isAir(b)) return true;
@@ -472,13 +486,13 @@ export function opNaturalize(vol, sel, params = {}) {
       let depth = 0;
       let col = pal; // palette de la colonne (auto : choisie à la surface)
       for (let y = sel.max.y; y >= sel.min.y; y--) {
-        if (isAir(vol.getBlock(x, y, z))) { depth = 0; continue; }
+        if (isAirAt(vol, x, y, z)) { depth = 0; continue; }
         if (depth === 0 && auto) {
           const biome = vol.getBiome ? vol.getBiome(x, y, z) : null;
           col = paletteOf(NATURALIZE_PRESETS[biomeToPreset(biome)], seed);
         }
         const target = depth === 0 ? col.surface : depth <= 3 ? col.soil : col.pick(x, y, z);
-        if (!sameBlock(vol.getBlock(x, y, z), target)) { vol.setBlock(x, y, z, clone(target)); c++; }
+        if (!matchesAt(vol, x, y, z, target)) { vol.setBlock(x, y, z, clone(target)); c++; }
         depth++;
       }
     }
@@ -577,11 +591,11 @@ export async function opTerrain(vol, sel, params = {}, ctx) {
       for (let y = minY; y <= topY; y++) {
         const depth = topY - y;
         const target = depth === 0 ? pal.surface : depth <= 3 ? pal.soil : pal.pick(x, y, z);
-        if (!sameBlock(vol.getBlock(x, y, z), target)) { vol.setBlock(x, y, z, clone(target)); c++; }
+        if (!matchesAt(vol, x, y, z, target)) { vol.setBlock(x, y, z, clone(target)); c++; }
       }
       if (clearAbove) {
         for (let y = topY + 1; y <= maxY; y++) {
-          if (!isAir(vol.getBlock(x, y, z))) { vol.setBlock(x, y, z, null); c++; }
+          if (!isAirAt(vol, x, y, z)) { vol.setBlock(x, y, z, null); c++; }
         }
       }
     }
