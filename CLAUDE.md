@@ -65,7 +65,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (191 tests aujourd'hui)
+npm test          # tous les paquets (211 tests aujourd'hui : 186 moteur, 25 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -99,6 +99,8 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Une capacité pour le renderer | la méthode dans `apps/desktop/src/engine/index.js`, puis son nom dans `ENGINE_METHODS` du preload |
 | Un outil dans l'interface | `TOOLS` et `TOOL_OPS` (`apps/desktop/src/renderer/store.js`) — l'inspecteur génère ses champs depuis le descripteur du moteur, il n'y a pas de formulaire à écrire |
 | Une couleur de bloc pour le viewport | `EXTRA` dans `apps/desktop/src/renderer/viewport/blockColors.js` (en attendant l'atlas) |
+| Un réglage de l'application | `DEFAULT_SETTINGS` (`apps/desktop/src/renderer/theme.js`) + son champ dans `Settings.jsx` ; il se persiste tout seul via `readSettings`/`writeSettings` de l'adapter |
+| Une variable de thème ou de densité | `theme.js` ET `tokens.css` — un test compare les deux à l'échelle 1, ne pas n'en changer qu'une |
 | Une icône | `apps/desktop/src/renderer/shell/icons.js` — le SEUL fichier du renderer qui importe `lucide-react` |
 | Un format d'entrée | `openAnyPath` (`apps/desktop/src/main/index.js`) décide selon l'extension ; dialogue, glisser-déposer et chemin de lancement y passent tous |
 
@@ -159,6 +161,18 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   donnée qui arrive plus tard va dans un effet.
 - **Une grille en `1fr` s'étire.** La carte des régions doit garder ses
   proportions de monde : colonnes à taille fixe, jamais `1fr`.
+- **Une couleur d'accent réglable casse le texte posé dessus.** Un accent sombre
+  choisi par l'utilisateur donnait un bouton principal noir sur noir. `inkOn`
+  (`theme.js`) tranche par contraste WCAG ; le test exige 4,5:1 sur chaque
+  accent proposé.
+- **Deux sources pour la même valeur par défaut divergent.** `tokens.css` sert
+  au premier rendu, `theme.js` ensuite : `--accent-dim` valait `#5E8D7E` en dur
+  contre `#5B8476` calculé, et l'interface sautait pendant une image. Un test
+  compare désormais les deux.
+- **Le coin entre deux barres de défilement est BLANC** tant qu'on ne le peint
+  pas (`::-webkit-scrollbar-corner`). Il n'apparaît que quand un conteneur
+  défile dans les deux sens — donc jamais pendant qu'on dessine l'interface, et
+  toujours chez qui a agrandi la sienne.
 - **Le verrou `session.lock` n'est détectable que sur Windows.** Ailleurs il est
   consultatif et une ouverture réussie ne prouve rien. `probeWorldLock` renvoie
   `{ locked, reliable }` : ne jamais réduire ça à un booléen, ce serait

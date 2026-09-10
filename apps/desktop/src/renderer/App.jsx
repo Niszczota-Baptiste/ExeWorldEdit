@@ -8,6 +8,8 @@ import BlockPalette from './shell/BlockPalette.jsx';
 import StatusBar from './shell/StatusBar.jsx';
 import ToolWheel from './shell/ToolWheel.jsx';
 import WorldPicker from './shell/WorldPicker.jsx';
+import Settings from './shell/Settings.jsx';
+import PerfPanel from './shell/PerfPanel.jsx';
 import Viewport from './viewport/Viewport.jsx';
 import { useApp } from './store.js';
 
@@ -24,9 +26,14 @@ export default function App() {
   const redo = useApp((s) => s.redo);
   const openPath = useApp((s) => s.openPath);
   const openWorld = useApp((s) => s.openWorld);
+  const loadSettings = useApp((s) => s.loadSettings);
+  const setSettingsOpen = useApp((s) => s.setSettingsOpen);
   const [dropping, setDropping] = useState(false);
 
   useEffect(() => { refresh(); }, [refresh]);
+  // Le thème AVANT les projets : appliquer les réglages après coup montrerait
+  // un instant l'apparence par défaut, puis la verrait sauter.
+  useEffect(() => { loadSettings(); }, [loadSettings]);
 
   // Glisser-déposer sur toute la fenêtre. Le renderer ne LIT pas le fichier :
   // il n'en transmet que le chemin, et c'est le processus principal qui décide
@@ -67,10 +74,11 @@ export default function App() {
       if (e.code === 'Space' && !typing && !e.repeat) { e.preventDefault(); setWheel(true); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') { e.preventDefault(); open(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === ',') { e.preventDefault(); setSettingsOpen(true); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setWheel, undo, redo, open]);
+  }, [setWheel, undo, redo, open, setSettingsOpen]);
 
   const minY = geometry?.min.y ?? 0;
   const maxY = geometry ? geometry.min.y + geometry.size.y - 1 : 0;
@@ -121,6 +129,8 @@ export default function App() {
                 </>
               )}
 
+              <PerfPanel />
+
               <ToolWheel />
 
               {dropping && (
@@ -151,6 +161,7 @@ export default function App() {
 
       <StatusBar />
       <WorldPicker />
+      <Settings />
     </div>
   );
 }

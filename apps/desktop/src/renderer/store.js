@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { DEFAULT_SETTINGS, normalizeSettings, applyTheme } from './theme.js';
 
 // État de l'application. Le renderer ne détient JAMAIS de vérité sur le build :
 // tout ce qui est ici est un reflet de ce que le moteur a répondu. Une opération
@@ -48,6 +49,13 @@ export const useApp = create((set, get) => ({
   /** Carte d'une save en attente de choix de zone (voir WorldPicker). */
   pendingWorld: null,
 
+  // ── Réglages et performances ────────────────────────────────────────────
+  settings: DEFAULT_SETTINGS,
+  settingsOpen: false,
+  /** Relevés par phase des dernières opérations, plus récent en tête. */
+  perfLog: [],
+  engineInfo: null,
+
   project: () => get().projects.find((p) => p.id === get().activeId) || null,
 
   setTool: (tool) => {
@@ -60,6 +68,7 @@ export const useApp = create((set, get) => ({
   setSelection: (selection) => set({ selection }),
   setStats: (patch) => set((s) => ({ stats: { ...s.stats, ...patch } })),
   setWheel: (wheelOpen) => set({ wheelOpen }),
+  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setPaletteQuery: (paletteQuery) => set({ paletteQuery }),
   say: (toast) => {
     set({ toast });
@@ -74,7 +83,7 @@ export const useApp = create((set, get) => ({
   },
 
   async activate(id) {
-    set({ activeId: id, geometry: null, selection: null });
+    set({ activeId: id, geometry: null, selection: null, perfLog: [] });
     const geometry = await api().engine.getGeometry({ id });
     const project = get().projects.find((p) => p.id === id);
     set({
@@ -83,6 +92,72 @@ export const useApp = create((set, get) => ({
       // Sélection par défaut : l'emprise du contenu, comme sur le site.
       selection: project ? { min: project.extent.min, max: project.extent.max } : null,
     });
+    await get().loadPerf(id);
+  },
+
+  // ── Réglages ──────────────────────────────────────────────────────────────
+
+  /**
+   * Les réglages vivent côté moteur. On applique le thème AVANT de rendre quoi
+   * que ce soit d'autre : appliquer après, c'est afficher un instant l'ancienne
+   * apparence puis la voir sauter.
+   */
+  async loadSettings() {
+    let settings = DEFAULT_SETTINGS;
+    try {
+      settings = normalizeSettings(await api().engine.getSettings());
+    } catch { /* premier lancement, ou moteur pas encore prêt */ }
+    applyTheme(settings);
+    set({ settings });
+    return settings;
+  },
+
+  /**
+   * Appliqué tout de suite, enregistré ensuite : régler une taille de texte
+   * demande de voir le résultat pendant qu'on bouge le curseur, pas après un
+   * aller-retour vers le disque.
+   */
+  async updateSettings(patch) {
+    const settings = normalizeSettings({ ...get().settings, ...patch });
+    applyTheme(settings);
+    set({ settings });
+    try {
+      await api().engine.saveSettings({ patch: settings });
+    } catch {
+      get().say('Réglages appliqués, mais non enregistrés : ils vaudront pour cette session.');
+    }
+    return settings;
+  },
+
+  resetSettings() { return get().updateSettings(DEFAULT_SETTINGS); },
+
+  // ── Relevés de performance ────────────────────────────────────────────────
+
+  /**
+   * Le journal du moteur est la source : ce qu'on affiche a réellement été
+   * mesuré pendant l'opération, ce n'est pas un chronomètre tenu par
+   * l'interface — qui compterait aussi ses propres allers-retours.
+   */
+  async loadPerf(id) {
+    try {
+      const lines = await api().engine.audit({ id, limit: 40 });
+      set({
+        perfLog: lines
+          .filter((l) => l.timings?.phases?.length)
+          .map((l) => ({
+            at: Date.parse(l.createdAt) || Date.now(),
+            operation: l.operation,
+            blocksChanged: l.blocksChanged || 0,
+            totalMs: l.timings.totalMs,
+            phases: l.timings.phases,
+          })),
+      });
+    } catch { /* pas de journal, pas de relevé */ }
+  },
+
+  /** Mémoire et plafonds du processus moteur — rafraîchis par le panneau. */
+  async refreshEngineInfo() {
+    try { set({ engineInfo: await api().engine.info() }); } catch { /* moteur occupé */ }
   },
 
   async open() { return get()._opened(() => api().openBuild()); },
@@ -158,6 +233,17 @@ export const useApp = create((set, get) => ({
       await get().refreshProjects();
       const geometry = await api().engine.getGeometry({ id });
       set({ geometry });
+      if (res.timings?.phases?.length) {
+        set((s) => ({
+          perfLog: [{
+            at: Date.now(),
+            operation,
+            blocksChanged: res.blocksChanged || 0,
+            totalMs: res.timings.totalMs,
+            phases: res.timings.phases,
+          }, ...s.perfLog].slice(0, 40),
+        }));
+      }
       get().say(`${operation} — ${res.blocksChanged.toLocaleString('fr-FR')} blocs en ${res.durationMs} ms.`);
       return res;
     } catch (e) {

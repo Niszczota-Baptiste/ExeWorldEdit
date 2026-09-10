@@ -36,11 +36,17 @@
   --text-dim: #9AA4B2;
   --text-faint: #6E7885;
 
-  /* Intentions */
+  /* Intentions.
+     Ces cinq-là sont RÉÉCRITES au démarrage par `renderer/theme.js` d'après la
+     couleur choisie dans les réglages ; les valeurs ci-dessous sont celles du
+     premier lancement, avant que le moteur ait répondu. */
   --accent: #7FB8A4;         /* céladon — outil actif, focus */
-  --accent-dim: #5E8D7E;
+  --accent-dim: #5B8476;
+  --accent-hot: #93C3B3;     /* survol du bouton principal */
   --accent-wash: rgba(127, 184, 164, 0.14);
-  --select: #E3B64F;         /* or — sélection et gizmos */
+  --accent-ink: #14201C;     /* texte POSÉ sur l'accent — calculé, pas choisi */
+  --select: #E3B64F;         /* or — sélection et gizmos, jamais réglable :
+                                c'est un code de lecture, pas une décoration */
   --select-wash: rgba(227, 182, 79, 0.16);
   --danger: #E0685E;
 
@@ -51,15 +57,22 @@
   --r-float: 12px;
   --r-pill: 999px;
 
-  /* Échelle typographique — quatre tailles, pas une de plus */
+  /* Échelle typographique — quatre tailles, pas une de plus.
+     Multipliées par `textScale` (réglages). */
   --t-micro: 12px;
   --t-small: 13px;
   --t-body: 15px;
   --t-title: 18px;
 
+  /* Densité de la coquille — multipliée par `uiScale` (réglages). Le viewport
+     n'a pas de taille propre : il prend ce qui reste. */
   --titlebar-h: 38px;
   --statusbar-h: 30px;
   --rail-w: 52px;
+  --tool-size: 36px;
+  --ctl-h: 30px;
+  --field-h: 28px;
+  --perf-w: 290px;
 
   /* Mouvement : seulement en réponse à une action */
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
@@ -111,3 +124,8 @@ body {
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover { background: #4A5460; background-clip: content-box; }
+/* Le coin entre deux barres de défilement est BLANC tant qu'on ne le peint pas.
+   Il ne se montre que lorsqu'un conteneur défile dans les deux sens — donc
+   jamais pendant qu'on dessine l'interface, et toujours chez l'utilisateur qui
+   a agrandi la sienne. */
+::-webkit-scrollbar-corner { background: transparent; }

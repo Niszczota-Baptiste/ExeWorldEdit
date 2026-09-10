@@ -13,7 +13,7 @@ export {
   Pickaxe, Search, Minus, X, Settings2, Layers, Layers3,
   FolderOpen, FolderTree,
   // Actions
-  Play, Undo2, Redo2, FileDown, Globe, AlertTriangle,
+  Play, Undo2, Redo2, FileDown, Globe, AlertTriangle, RotateCcw, ChevronDown,
   // Barre d'état
   Gauge, Boxes, Crosshair, MemoryStick, History, ArrowRight,
 } from 'lucide-react';

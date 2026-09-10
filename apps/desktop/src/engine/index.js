@@ -350,6 +350,17 @@ const methods = {
 
   hasClipboard: () => !!clipboard,
 
+  // ── Réglages ──────────────────────────────────────────────────────────────
+  //
+  // Ils vivent avec les données du moteur et non dans le `localStorage` du
+  // renderer : celui-ci est effacé par un vidage de cache, et un réglage perdu
+  // à chaque mise à jour n'est pas un réglage.
+
+  getSettings: () => adapter.readSettings(),
+
+  /** Fusion, pas remplacement : l'interface n'envoie que ce qu'elle change. */
+  saveSettings: ({ patch }) => adapter.writeSettings(patch || {}),
+
   // ── Diagnostic ────────────────────────────────────────────────────────────
 
   info: () => ({

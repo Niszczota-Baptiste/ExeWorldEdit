@@ -262,6 +262,11 @@ app.whenReady().then(async () => {
           win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(w * 0.36), y: Math.round(h * 0.34) });
           await new Promise((r) => setTimeout(r, 400));
         }
+        // Même principe pour les réglages : Ctrl + virgule, le raccourci réel.
+        if (process.env.TITI_SCREENSHOT_SETTINGS) {
+          win.webContents.sendInputEvent({ type: 'keyDown', keyCode: ',', modifiers: ['control'] });
+          await new Promise((r) => setTimeout(r, 700));
+        }
         const image = await win.webContents.capturePage();
         // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin de capture, fourni au lancement
         fs.writeFileSync(process.env.TITI_SCREENSHOT, image.toPNG());

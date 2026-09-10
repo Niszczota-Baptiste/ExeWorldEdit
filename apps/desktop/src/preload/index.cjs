@@ -14,6 +14,7 @@ const ENGINE_METHODS = [
   'apply', 'undo', 'redo', 'reset', 'audit',
   'inspectWorld',
   'listSchematics', 'saveSchematic', 'loadSchematic', 'removeSchematic', 'hasClipboard',
+  'getSettings', 'saveSettings',
   'info',
 ];
 

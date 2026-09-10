@@ -1,4 +1,4 @@
-import { Minus, Square, X, Search, Pickaxe } from './icons.js';
+import { Minus, Square, X, Search, Pickaxe, Settings2, Gauge } from './icons.js';
 import { useApp } from '../store.js';
 
 // Barre de titre maison : onglets de projets et recherche. La zone vide est
@@ -9,6 +9,9 @@ export default function TitleBar() {
   const projects = useApp((s) => s.projects);
   const activeId = useApp((s) => s.activeId);
   const activate = useApp((s) => s.activate);
+  const openSettings = useApp((s) => s.setSettingsOpen);
+  const perf = useApp((s) => s.settings.perf);
+  const update = useApp((s) => s.updateSettings);
   const isWindows = window.titi?.platform === 'win32';
 
   return (
@@ -41,6 +44,27 @@ export default function TitleBar() {
         <Search size={12} />
         <span>Rechercher une action</span>
         <kbd>Ctrl K</kbd>
+      </button>
+
+      {/* Le relevé s'allume d'ici : quand une commande traîne, on veut savoir
+          pourquoi tout de suite, pas après un détour par les réglages. */}
+      <button
+        className="title-btn"
+        data-active={perf}
+        title={perf ? 'Masquer le relevé de performance' : 'Afficher le relevé de performance'}
+        aria-pressed={perf}
+        onClick={() => update({ perf: !perf })}
+      >
+        <Gauge size={14} />
+      </button>
+
+      <button
+        className="title-btn"
+        title="Réglages (Ctrl ,)"
+        aria-label="Réglages"
+        onClick={() => openSettings(true)}
+      >
+        <Settings2 size={14} />
       </button>
 
       {/* Sur Windows, `titleBarOverlay` dessine les vrais boutons système :

@@ -247,6 +247,99 @@ transmet que le chemin.
 
 ---
 
+## Réglages et mode performance
+
+Les réglages vivent dans `settings.json`, à la racine de l'espace de données, et
+passent par le `StorageAdapter` (`readSettings` / `writeSettings`) comme tout le
+reste. Ils ne sont **pas** dans le `localStorage` du renderer : celui-ci est
+effacé par un vidage de cache, et un réglage qui disparaît à chaque mise à jour
+n'est pas un réglage.
+
+![Les réglages](images/reglages.png)
+
+Quatre réglages, appliqués **à la frappe** et non à la validation — un réglage
+d'apparence qu'on ne voit qu'après avoir fermé la fenêtre se règle à l'aveugle :
+
+| Réglage | Effet | Bornes |
+|---|---|---|
+| `textScale` | multiplie `--t-micro/small/body/title` | 0,8 → 1,6 |
+| `uiScale` | multiplie la densité de la coquille (barres, rail, boutons, champs) | 0,85 → 1,5 |
+| `accent` | `--accent` et ses quatre nuances dérivées | tout `#RRGGBB` |
+| `perf` | affiche le relevé des opérations | oui / non |
+
+### Tout passe par des variables CSS
+
+`renderer/theme.js` transforme les réglages en une poignée de variables posées
+sur `:root` ; la feuille de style entière suit. Aucun composant ne lit les
+réglages pour se dimensionner lui-même, sans quoi la moitié de l'interface
+obéirait et l'autre non.
+
+Ce module est **pur** en dehors de `applyTheme` — donc testé sans navigateur
+(`apps/desktop/test/theme.test.js`, 11 tests). Deux choses s'y vérifient qu'on
+ne voit pas à l'œil :
+
+- **`inkOn(accent)`** choisit le texte du bouton principal par contraste WCAG.
+  Sans ce calcul, un accent sombre choisi par l'utilisateur donne un bouton noir
+  sur noir : le réglage casserait l'interface au lieu de la personnaliser. Le
+  test exige 4,5:1 sur chaque accent proposé.
+- **`tokens.css` et le module ne doivent pas diverger.** Le premier sert au tout
+  premier rendu, avant que le moteur ait répondu ; le second sert ensuite. Un
+  test compare les deux à l'échelle 1 — et a trouvé l'écart dès sa première
+  exécution : `--accent-dim` valait `#5E8D7E` en dur contre `#5B8476` calculé.
+  L'interface sautait au démarrage, pendant une image.
+
+L'or de la sélection (`--select`) n'est **pas** réglable : c'est un code de
+lecture partagé par le viewport, la pastille d'onglet et la barre d'état, pas
+une décoration.
+
+### Le relevé des opérations
+
+Le moteur chronomètre chaque opération en quatre temps (`phaseTimer`,
+`staging/geometry.js`), exactement les mêmes que ceux annoncés par la barre de
+progression :
+
+| Phase | Ce qu'elle couvre |
+|---|---|
+| `load` | décoder les régions touchées, warmup du `RegionStore` |
+| `apply` | l'opération elle-même |
+| `commit` | instantané d'annulation + réécriture des régions |
+| `preview` | redériver l'aperçu 3D |
+| `reste` | ce que les quatre n'ont pas couvert (validation, journal) |
+
+Le relevé est joint au résultat de l'opération **et consigné au journal**
+(`AuditEntry.timings`), donc consultable après coup : ouvrir un projet recharge
+son historique de mesures depuis `audit.jsonl`. Ce que le panneau montre a donc
+réellement été mesuré dans le moteur — ce n'est pas un chronomètre tenu par
+l'interface, qui compterait aussi les allers-retours entre processus.
+
+![Le relevé de performance](images/performances.png)
+
+Chaque ligne porte une barre **à l'échelle** des durées, et la phase dominante
+est nommée en clair : la déduire de la largeur d'un segment n'est pas la donner.
+Le cumul en bas répond à l'autre question — une commande lente une fois est un
+accident, la même phase lente dix fois est une cible.
+
+### Ce que le relevé a montré tout de suite
+
+Sur le build de démonstration (192 × 192, 850 000 blocs, 12 opérations) :
+
+```
+Cumul sur 12 opérations
+aperçu 82 %  ·  calcul 9 %  ·  lecture 6 %  ·  écriture 3 %  ·  reste 0 %
+```
+
+**82 % du temps du moteur part à régénérer l'aperçu.** Poser 121 blocs avec
+`set` coûte 815 ms, dont 761 ms (93 %) d'aperçu. La cause est structurelle :
+`regenPreview` reparcourt l'emprise ENTIÈRE du build après chaque opération —
+2,1 millions de cases ici — quel que soit le nombre de blocs réellement changés.
+
+C'est une cible de la phase 1.2, pas de ce commit : un aperçu incrémental ne
+redériverait que les chunks touchés, que `applyOperation` connaît déjà (il rend
+déjà `bounds`). La noter ici plutôt que la corriger au passage, c'est justement
+la leçon de la phase 1.1 — on mesure d'abord, on optimise ensuite.
+
+---
+
 ## Écarts assumés avec le moteur du site
 
 | Sujet | Site | Ici | Pourquoi |
@@ -270,6 +363,9 @@ transmet que le chemin.
   texte et fait un `findIndex` sur la palette de section à chaque bloc,
   `getBlock` alloue un objet par appel. Phase 1.2.
 - **Un seul fil d'exécution.** Pas de pool de workers. Phase 1.2.
+- **L'aperçu se redérive en entier** après chaque opération, alors que
+  `applyOperation` sait déjà quelles bornes ont bougé. C'est 82 % du temps
+  moteur mesuré sur le build de démonstration. Phase 1.2.
 
 ### Ce que le viewport ne fait pas encore
 
@@ -373,6 +469,12 @@ npm run demo     --workspace @titi/desktop -- <dossier-de-données>
 TITI_SCREENSHOT=/chemin/capture.png xvfb-run -a npx electron .
 ```
 
+`TITI_SCREENSHOT_WHEEL=1` et `TITI_SCREENSHOT_SETTINGS=1` ouvrent la roue
+d'outils ou les réglages avant la capture, par un **vrai** événement clavier
+(`Espace`, `Ctrl` `,`) et non par un crochet de test : ce qu'on capture est alors
+exactement ce que produit la touche, pas un état forcé qui pourrait mentir.
+`TITI_SCREENSHOT_DELAY` règle l'attente avant la prise (9 000 ms par défaut).
+
 `TITI_DATA_ROOT` déplace l'espace de données (par défaut
 `%APPDATA%/TitiWorldEdit`), ce qui permet de travailler sur un jeu de projets
 jetable sans toucher au vrai.
@@ -388,10 +490,11 @@ jetable sans toucher au vrai.
 | 2.2 | Ouverture et export | **fait** — `.mca`, `.zip`, dossier de save, dossier `region/`, `.schem`, `.litematic`, glisser-déposer ; export `.mca`/`.schem`/`.litematic` ; « Appliquer au monde » avec verrou `session.lock` et sauvegarde horodatée. Reste : récupération après crash explicite (le staging est déjà persistant) |
 | 2.3 | Direction visuelle (jetons, Pretendard, roue d'outils) | **fait** |
 | 2.4 | Disposition (panneaux, inspecteur généré, palette virtualisée) | fait pour l'essentiel ; `Ctrl+K` et thème clair à venir |
+| 2.4b | Réglages (texte, densité, accent) + mode performance | **fait** — `settings.json` via l'adapter, `theme.js` testé, relevé par phase |
 | 2.5 | Viewport | maillage par chunk + AO **fait** ; atlas de textures et modèles non cubiques à venir |
 | 2.6 | Empaquetage | configuration electron-builder écrite, jamais exécutée sur Windows |
 | 1.1 | Mesurer | **fait** — `bench/`, 16 scénarios, `RESULTS.md` |
-| 1.2 | Moteur rapide | dépack de sections **× 10,7** ; reste : `RegionStore` en tableaux typés, pool de workers, plafonds réglables |
+| 1.2 | Moteur rapide | dépack de sections **× 10,7** ; reste : aperçu incrémental (82 % du temps mesuré), `RegionStore` en tableaux typés, pool de workers, plafonds réglables |
 | 1.3 | Entités | à venir |
 | 3 | Brushs | à venir |
 | 4 | Tracés, PNJ, dispersion | à venir |
