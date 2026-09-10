@@ -28,6 +28,39 @@ export function regionFileName(regionX, regionZ, sep = '.') {
   return `r${sep}${regionX}${sep}${regionZ}.mca`;
 }
 
+/**
+ * Coordonnées de région lues DANS le fichier, et non dans son nom.
+ *
+ * Un nom de fichier est une métadonnée qui peut mentir : Windows renomme un
+ * téléchargement en double `r.0.0 (16).mca`, un utilisateur range ses régions
+ * sous d'autres noms. Le contenu, lui, ne ment pas — chaque chunk porte ses
+ * `xPos` / `zPos` en coordonnées monde, et une région couvre 32 × 32 chunks.
+ *
+ * Coûteux comparé à la lecture du nom (il faut décompresser et analyser un
+ * chunk) : à n'utiliser QUE lorsque le nom n'a rien donné.
+ *
+ * Rend `null` si le fichier ne contient aucun chunk exploitable.
+ */
+export async function regionCoordsFromContent(buffer, { regionX = 0, regionZ = 0 } = {}) {
+  let region;
+  try {
+    region = readRegion(buffer, regionX, regionZ);
+  } catch {
+    return null;
+  }
+  for (const chunk of region.chunks) {
+    try {
+      await decodeChunk(chunk);
+      const v = chunk.root?.value;
+      const x = v?.xPos?.value, z = v?.zPos?.value;
+      if (Number.isFinite(x) && Number.isFinite(z)) {
+        return { regionX: Math.floor(x / 32), regionZ: Math.floor(z / 32) };
+      }
+    } catch { /* chunk illisible : on tente le suivant */ }
+  }
+  return null;
+}
+
 function inflate(payload, compression) {
   if (compression === 1) return zlib.gunzipSync(payload, { maxOutputLength: MAX_CHUNK_INFLATED });
   if (compression === 2) return zlib.inflateSync(payload, { maxOutputLength: MAX_CHUNK_INFLATED });

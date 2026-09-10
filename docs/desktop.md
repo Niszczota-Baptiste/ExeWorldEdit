@@ -905,6 +905,49 @@ le reste : elle précède le choix de l'opération.
 
 ---
 
+## Un nom de fichier ne fait pas foi
+
+Ouvrir `r.0.0 (16).mca` — le nom que Windows donne à un téléchargement en
+double — échouait par `region_coords_unknown`, à chaque appel du moteur, en
+boucle.
+
+`materialize` déduisait l'emplacement de la région du NOM du fichier, et
+`regionCoordsFromName` n'accepte que `r.X.Z.mca` exactement. Or un nom est une
+métadonnée : il peut être renommé, préfixé, suffixé. Le **contenu**, lui, ne
+ment pas — chaque chunk porte ses `xPos` / `zPos` en coordonnées monde, et une
+région couvre 32 × 32 chunks.
+
+`regionCoordsFromContent` lit donc les coordonnées dans le fichier. Elle est
+coûteuse comparée à la lecture du nom (il faut décompresser et analyser un
+chunk), d'où l'ordre : **le nom d'abord, le contenu ensuite**.
+
+La résolution a lieu à l'**import**, pas à la matérialisation, pour deux
+raisons : `materialize` est appelé depuis du code synchrone et le rendre
+asynchrone se propagerait partout ; et surtout le source est alors rangé sous
+son nom canonique, si bien que tout le reste du moteur n'a jamais affaire qu'à
+des `r.X.Z.mca`. L'ambiguïté est levée une fois, à l'entrée.
+
+## Fermer un projet
+
+La croix des onglets était un `<span>` décoratif : aucun gestionnaire, aucun
+moyen de se débarrasser d'un projet — y compris d'un projet cassé qui relançait
+son erreur à chaque appel.
+
+`closeProject` existait pourtant côté moteur et dans la liste blanche du
+preload. Il manquait les dix lignes qui les relient.
+
+Deux points de conception :
+
+- **c'est un `<div role="tab">` et non un `<button>`.** La croix est elle-même
+  un bouton, et un bouton dans un bouton n'est pas du HTML valide : le
+  navigateur défait l'imbrication et le clic devient imprévisible ;
+- **fermer, c'est supprimer**, donc ça se confirme. Il n'y a pas d'état
+  « ouvert » distinct de l'existence : un projet EST sa copie de staging. La
+  confirmation dit ce qui part et rappelle ce qui reste — le fichier d'origine
+  n'est jamais touché, c'est l'invariant n° 1.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed

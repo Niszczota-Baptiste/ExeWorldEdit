@@ -168,6 +168,13 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   donnée qui arrive plus tard va dans un effet.
 - **Une grille en `1fr` s'étire.** La carte des régions doit garder ses
   proportions de monde : colonnes à taille fixe, jamais `1fr`.
+- **Un nom de fichier n'est pas une source de vérité.** `r.0.0 (16).mca` (le
+  doublon de téléchargement de Windows) faisait échouer l'ouverture. Le contenu
+  d'un `.mca` porte ses propres coordonnées : `regionCoordsFromContent`. Le nom
+  d'abord parce que c'est gratuit, le contenu ensuite parce qu'il ne ment pas.
+- **Un bouton dans un bouton n'est pas du HTML valide.** La croix des onglets
+  était un `<span>` inerte pour cette raison ; l'onglet est devenu un
+  `<div role="tab">` pour que la croix puisse être un vrai bouton.
 - **Une `BrowserWindow` détruite est un objet VRAI.** `win?.webContents` ne
   protège de rien : le `?.` ne voit qu'un `null`. Tout envoi au renderer depuis
   un processus qui survit à la fenêtre (le moteur, un minuteur) doit passer par

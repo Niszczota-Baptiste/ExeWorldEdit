@@ -9,6 +9,7 @@ export default function TitleBar() {
   const projects = useApp((s) => s.projects);
   const activeId = useApp((s) => s.activeId);
   const activate = useApp((s) => s.activate);
+  const closeProject = useApp((s) => s.closeProject);
   const openSettings = useApp((s) => s.setSettingsOpen);
   const perf = useApp((s) => s.settings.perf);
   const update = useApp((s) => s.updateSettings);
@@ -23,20 +24,32 @@ export default function TitleBar() {
 
       <div className="tabs" role="tablist" aria-label="Projets ouverts">
         {projects.map((p) => (
-          <button
+          // Un `div` et non un `button` : la croix est elle-même un bouton, et
+          // un bouton dans un bouton n'est pas du HTML valide — le navigateur
+          // défait l'imbrication et le clic devient imprévisible.
+          <div
             key={p.id}
             className="tab"
             role="tab"
+            tabIndex={0}
             data-active={p.id === activeId}
             aria-selected={p.id === activeId}
             onClick={() => activate(p.id)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(p.id); } }}
           >
             {/* Le point doré dit « modifications non exportées », comme la
                 pastille de sélection du viewport. Même code couleur partout. */}
             {p.pending && <span className="tab-dot" title="Modifications non exportées" />}
             <span className="tab-name">{p.name}</span>
-            <span className="tab-close" aria-hidden="true"><X size={11} /></span>
-          </button>
+            <button
+              className="tab-close"
+              aria-label={`Fermer ${p.name}`}
+              title="Fermer — supprime la copie de travail"
+              onClick={(e) => { e.stopPropagation(); closeProject(p.id); }}
+            >
+              <X size={11} />
+            </button>
+          </div>
         ))}
       </div>
 

@@ -3,7 +3,7 @@
 // Encodage/décodage d'une section paletteisée : ./section.js
 export {
   readRegion, writeRegion, decodeChunk, chunkSections,
-  readSection, writeSection, regionCoordsFromName, regionFileName,
+  readSection, writeSection, regionCoordsFromName, regionCoordsFromContent, regionFileName,
   chunkBlockEntities, setChunkBlockEntities, blockEntityPos, moveBlockEntity,
 } from './region.js';
 export {

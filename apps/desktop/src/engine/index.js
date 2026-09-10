@@ -5,7 +5,7 @@ import {
   createStaging, createLibrary, buildExtent, buildLimits,
   schematicToRegions, volumeToSchematic, normalizeLimits, LIMIT_RANGES,
 } from '@titi/we-engine/staging';
-import { regionCoordsFromName } from '@titi/we-engine/anvil';
+import { regionFileName } from '@titi/we-engine/anvil';
 import {
   readSaveInfo, probeWorldLock, applyToWorld,
   worldOverview, regionsForBBox, regionBounds, selectRegions, readRegions, REGION_SPAN,
@@ -64,13 +64,23 @@ const methods = {
     // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin issu du dialogue « Ouvrir » du système, choisi par l'utilisateur
     const buffer = fs.readFileSync(filePath);
     const id = `p${Date.now().toString(36)}`;
+    const isZip = /\.zip$/i.test(base);
+
+    // Où vit cette région ? Le nom le dit d'habitude, mais pas toujours :
+    // Windows renomme un téléchargement en double `r.0.0 (16).mca`. On lit
+    // alors les coordonnées DANS le fichier, et on range le source sous son nom
+    // canonique — ainsi tout le reste du moteur n'a affaire qu'à des `r.X.Z.mca`.
+    const rc = isZip ? null : await staging.resolveRegionCoords(base, buffer);
+    if (!isZip && !rc) throw new Error('region_coords_unknown');
 
     adapter.saveProject({ id, name: name || base, min: { x: 0, y: -64, z: 0 }, size: { x: 1, y: 1, z: 1 } });
-    adapter.attachSource(id, { name: base, buffer });
+    adapter.attachSource(id, {
+      name: rc ? regionFileName(rc.regionX, rc.regionZ) : base,
+      buffer,
+    });
 
     // L'emprise réelle n'est connue qu'après lecture : on part de la région
-    // annoncée par le nom du fichier, puis on la resserre sur le contenu.
-    const rc = /\.zip$/i.test(base) ? null : regionCoordsFromName(base);
+    // trouvée, puis on la resserre sur le contenu.
     if (rc) {
       adapter.saveExtent(id, {
         min: { x: rc.regionX * 512, y: -64, z: rc.regionZ * 512 },

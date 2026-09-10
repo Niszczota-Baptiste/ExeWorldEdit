@@ -79,10 +79,10 @@ export const useApp = create((set, get) => ({
     if (toast) setTimeout(() => { if (get().toast === toast) set({ toast: null }); }, 4000);
   },
 
-  async refreshProjects() {
+  async refreshProjects({ activateFirst = true } = {}) {
     const projects = await api().engine.listProjects();
     set({ projects });
-    if (!get().activeId && projects[0]) await get().activate(projects[0].id);
+    if (activateFirst && !get().activeId && projects[0]) await get().activate(projects[0].id);
     return projects;
   },
 
@@ -180,6 +180,36 @@ export const useApp = create((set, get) => ({
   /** Mémoire et plafonds du processus moteur — rafraîchis par le panneau. */
   async refreshEngineInfo() {
     try { set({ engineInfo: await api().engine.info() }); } catch { /* moteur occupé */ }
+  },
+
+  /**
+   * Ferme un projet — ce qui EFFACE sa copie de travail.
+   *
+   * Il n'y a pas d'état « ouvert » séparé de l'existence : un projet est sa
+   * copie de staging. Fermer, c'est donc supprimer, et ça se confirme — surtout
+   * quand des modifications n'ont pas été exportées. Le fichier d'ORIGINE, lui,
+   * n'est jamais touché : c'est l'invariant n° 1.
+   */
+  async closeProject(id) {
+    const p = get().projects.find((x) => x.id === id);
+    if (!p) return;
+    const message = p.pending
+      ? `Fermer « ${p.name} » ?\n\nSes modifications non exportées seront perdues.\nLe fichier d’origine n’est pas touché.`
+      : `Fermer « ${p.name} » ?\n\nLa copie de travail est supprimée ; le fichier d’origine n’est pas touché.`;
+    if (!window.confirm(message)) return;
+
+    try {
+      await api().engine.closeProject({ id });
+    } catch (e) {
+      get().say(errorText(e, 'fermeture'));
+      return;
+    }
+    const reste = await get().refreshProjects({ activateFirst: false });
+    if (get().activeId === id) {
+      set({ activeId: null, geometry: null, selection: null, perfLog: [] });
+      if (reste[0]) await get().activate(reste[0].id);
+    }
+    get().say(`« ${p.name} » fermé.`);
   },
 
   async open() { return get()._opened(() => api().openBuild()); },
@@ -353,6 +383,7 @@ function errorText(e, context) {
     no_area: 'Aucune zone demandée : choisis les régions à ouvrir.',
     empty_area: 'Cette zone n’a jamais été générée dans ce monde.',
     bad_schematic: 'Ce fichier n’est pas un schematic lisible.',
+    region_coords_unknown: 'Impossible de situer cette région : ni son nom ni son contenu ne le disent. Ce fichier n’est peut-être pas un .mca valide.',
   };
   return table[code] || `Échec de ${context} : ${code}`;
 }

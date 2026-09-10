@@ -1067,3 +1067,39 @@ test('un bloc qui remplace un coffre n’en garde pas le contenu', async () => {
   const entities = await readBackEntities(out.buffer);
   assert.equal(entities.size, 0, 'un coffre fantôme réapparaîtrait sous le bloc suivant');
 });
+
+// ── Nom de fichier bricolé ──────────────────────────────────────────────────
+//
+// Un nom de fichier est une métadonnée qui peut mentir : Windows renomme un
+// téléchargement en double `r.0.0 (16).mca`. Refuser le fichier pour son nom
+// alors que ses coordonnées sont lisibles DEDANS, c'est refuser un fichier
+// parfaitement valide — et c'est ce qui arrivait.
+
+test('regionCoordsFromContent lit les coordonnées dans le fichier', async () => {
+  const { regionCoordsFromContent } = await import('../src/anvil/index.js');
+  // La fixture construit un chunk (0,0) : région 0,0.
+  const buf = buildRegion([{ x: 1, y: 1, z: 1, Name: STONE }]);
+  assert.deepEqual(await regionCoordsFromContent(buf), { regionX: 0, regionZ: 0 });
+});
+
+test('regionCoordsFromContent rend null sur ce qui n’est pas une région', async () => {
+  const { regionCoordsFromContent } = await import('../src/anvil/index.js');
+  assert.equal(await regionCoordsFromContent(Buffer.alloc(0)), null);
+  assert.equal(await regionCoordsFromContent(Buffer.from('pas une région')), null);
+});
+
+test('resolveRegionCoords préfère le nom, et retombe sur le contenu', async () => {
+  const { staging } = makeProject();
+  const buf = buildRegion([{ x: 1, y: 1, z: 1, Name: STONE }]);
+
+  // Nom canonique : lu directement, sans décoder.
+  assert.deepEqual(await staging.resolveRegionCoords('r.3.-2.mca', buf), { regionX: 3, regionZ: -2 });
+
+  // Noms que Windows ou un utilisateur produisent : le contenu tranche.
+  for (const nom of ['r.0.0 (16).mca', 'ma région.mca', 'copie de r.0.0.mca', '']) {
+    assert.deepEqual(await staging.resolveRegionCoords(nom, buf), { regionX: 0, regionZ: 0 }, nom);
+  }
+
+  // Et rien de lisible nulle part : on le dit, on ne devine pas.
+  assert.equal(await staging.resolveRegionCoords('inconnu.mca', Buffer.from('vide')), null);
+});

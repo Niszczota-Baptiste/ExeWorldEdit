@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import {
-  regionFileName, regionCoordsFromName, writeRegion, readRegion, decodeChunk,
+  regionFileName, regionCoordsFromName, regionCoordsFromContent, writeRegion, readRegion, decodeChunk,
 } from '../anvil/index.js';
 import { extractMcaEntries } from '../worldedit/zipReader.js';
 import { RegionStore } from '../worldedit/regionStore.js';
@@ -109,6 +109,19 @@ export function createStaging(adapter, options = {}) {
 
   // ── Matérialisation ───────────────────────────────────────────────────────
 
+  /**
+   * Coordonnées de région d'un `.mca` qu'on s'apprête à importer.
+   *
+   * Le nom d'abord — c'est gratuit. Puis le CONTENU, qui ne ment pas : Windows
+   * renomme un téléchargement en double `r.0.0 (16).mca`, et un utilisateur
+   * range parfois ses régions sous d'autres noms. Refuser un fichier pour son
+   * nom alors qu'on sait lire ses coordonnées dedans, c'est refuser un fichier
+   * parfaitement valide.
+   */
+  async function resolveRegionCoords(name, buffer) {
+    return regionCoordsFromName(name) || regionCoordsFromContent(buffer);
+  }
+
   /** Déplie le source du projet en r.X.Z.mca sous regions/. Idempotent. */
   function materialize(project) {
     const rdir = regionsDir(project.id);
@@ -121,6 +134,9 @@ export function createStaging(adapter, options = {}) {
         fs.writeFileSync(path.join(rdir, regionFileName(e.regionX, e.regionZ)), e.data);
       }
     } else {
+      // Le source est rangé sous son nom CANONIQUE au moment de l'import
+      // (`resolveRegionCoords`), justement pour que cette lecture ne puisse
+      // pas échouer ici : un nom d'origine peut être n'importe quoi.
       const rc = regionCoordsFromName(project.source.name);
       if (!rc) throw new Error('region_coords_unknown');
       fs.writeFileSync(path.join(rdir, regionFileName(rc.regionX, rc.regionZ)), buf);
@@ -843,6 +859,7 @@ export function createStaging(adapter, options = {}) {
     listAudit: (id, limit = 100) => adapter.listAudit(id, limit),
     // matérialisation
     materialize,
+    resolveRegionCoords,
     seedRegions,
     listRegionFiles,
     /** Dossier des régions de travail — pour les relire telles quelles. */
