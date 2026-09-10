@@ -790,15 +790,30 @@ Le critère est simple : un paquet ne doit contenir que ce qu'un processus
 `@titi/we-engine` et ses dépendances (`prismarine-nbt`, `protodef`,
 `opentype.js`). Tout le reste vit dans le renderer, donc dans le bundle.
 
-### Ce qui est vérifié, et ce qui ne l'est pas
+### Ce qui est vérifié
 
-Le paquet **Linux** a été construit et **lancé** : même rendu, mêmes 385 appels
-de dessin, même palette, depuis l'archive asar. La collecte de fichiers,
+Le paquet **Linux** a été construit et **lancé** ici : même rendu, mêmes 385
+appels de dessin, même palette, depuis l'archive asar. La collecte de fichiers,
 l'embarquement du workspace et l'`asarUnpack` sont donc corrects.
 
-La cible **Windows** s'arrête sur `spawn wine ENOENT` depuis Linux : graver les
-métadonnées et l'icône d'un `.exe` demande wine. Ce dernier maillon ne peut se
-vérifier que sur une vraie machine Windows.
+La cible **Windows** ne peut pas se construire depuis Linux : graver les
+métadonnées d'un `.exe` demande wine, et `npm run dist` s'y arrête sur
+`spawn wine ENOENT`.
+
+Elle a été construite **sur Windows** (10.0.26200), et passe :
+
+```
+• updating asar integrity executable resource  executablePath=…\Titi WorldEdit.exe
+• building  target=nsis      file=release\Titi WorldEdit-0.1.0-x64.exe
+• building  target=portable  file=release\Titi WorldEdit-0.1.0-portable.exe
+```
+
+Trois artefacts : l'installeur NSIS, la version portable, et le dossier déplié.
+Aucune erreur.
+
+Il n'y a **pas de signature de code** : `signtool` est appelé mais aucun
+certificat n'est configuré, donc Windows affiche un avertissement SmartScreen
+au premier lancement. C'est un achat de certificat, pas un défaut à corriger.
 
 ### L'icône, par un script plutôt qu'un binaire posé là
 
@@ -1035,7 +1050,7 @@ jetable sans toucher au vrai.
 | 2.4 | Disposition (panneaux, inspecteur généré, palette virtualisée) | fait pour l'essentiel ; `Ctrl+K` et thème clair à venir |
 | 2.4b | Réglages (texte, densité, accent) + mode performance | **fait** — `settings.json` via l'adapter, `theme.js` testé, relevé par phase |
 | 2.5 | Viewport | maillage par chunk + AO **fait** ; atlas de textures et modèles non cubiques à venir |
-| 2.6 | Empaquetage | configuration **corrigée et exercée** (paquet Linux construit et lancé) ; la cible Windows reste à faire tourner sur une vraie machine Windows — wine est requis pour graver l'exe depuis Linux |
+| 2.6 | Empaquetage | **fait** — installeur NSIS et portable construits sur Windows, paquet Linux construit et lancé. Reste : signature de code (certificat à acheter) |
 | 1.1 | Mesurer | **fait** — `bench/`, 16 scénarios, `RESULTS.md` |
 | 1.2 | Moteur rapide | **fait** — dépack de sections × 10,7, `RegionStore` (set-10M × 6,7), aperçu binaire et incrémental × 11,1 (−82 % sur le total), pool de fils × 2,4 sur `terrain`, plafonds réglables. Reste : aperçu découpé par chunk, `getBlock` sans allocation |
 | 1.3 | Entités | block entities **faites** (portées par les opérations et l'export décalé, biomes compris) ; entités mobiles (`entities/*.mca`) à venir |
