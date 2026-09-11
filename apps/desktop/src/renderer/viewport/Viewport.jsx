@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { voxelFromHit, brushPositions, lineBetween, Stroke } from './brush.js';
+import { buildAtlas, makeAtlasMaterial } from './atlas.js';
 import * as THREE from 'three';
 import { sparseToChunks, paddedChunk, createMeshPool, CH } from './voxels.js';
 import { buildTables } from './blockColors.js';
@@ -82,6 +83,8 @@ export default function Viewport({ geometry, layerY, onStats, onHover, brush, on
       ro.disconnect();
       controls.dispose();
       state.pool?.dispose();
+      state.material?.dispose();
+      state.atlasTexture?.dispose();
       renderer.dispose();
       host.removeChild(renderer.domElement);
     };
@@ -198,11 +201,35 @@ export default function Viewport({ geometry, layerY, onStats, onHover, brush, on
     const { colors, opaque } = buildTables(geometry.palette);
     state.pool ??= createMeshPool();
 
-    const material = new THREE.MeshBasicMaterial({ vertexColors: true });
-
     (async () => {
       const t0 = performance.now();
       let quads = 0;
+
+      // L'ATLAS d'abord : les couches doivent partir AVEC le maillage, pas
+      // après. Recoller des textures sur des maillages déjà construits
+      // voudrait dire reconstruire tous les attributs — autant les mailler une
+      // fois, bien.
+      //
+      // Sans pack, `blockFaces` rend un objet vide : tout tombe sur la couche 0,
+      // qui est blanche, et le build s'affiche exactement comme avant.
+      let atlas = null;
+      try {
+        const faces = await window.titi.engine.blockFaces({ ids: geometry.palette.map((b) => b.name) });
+        if (Object.keys(faces).length) {
+          atlas = await buildAtlas(geometry.palette, faces);
+        }
+      } catch { atlas = null; }
+      if (cancelled) return;
+
+      // L'ancien matériau est remplacé, pas gardé : deux matériaux vivants
+      // voudraient dire deux programmes compilés pour le même build.
+      state.material?.dispose();
+      state.atlasTexture?.dispose();
+      const material = atlas
+        ? makeAtlasMaterial(atlas.texture)
+        : new THREE.MeshBasicMaterial({ vertexColors: true });
+      state.material = material;
+      state.atlasTexture = atlas?.texture || null;
       // Les chunks les plus proches de la caméra d'abord : le build apparaît
       // depuis le point de vue au lieu de se remplir dans un ordre arbitraire.
       const keys = [...chunks.keys()].sort((a, b) => distToCamera(a, state.camera) - distToCamera(b, state.camera));
@@ -211,7 +238,14 @@ export default function Viewport({ geometry, layerY, onStats, onHover, brush, on
         const [cx, cy, cz] = key.split(',').map(Number);
         const ids = paddedChunk(chunks, cx, cy, cz);
         const res = await state.pool.mesh(
-          { key, origin: [cx * CH, cy * CH, cz * CH], ids: ids.buffer, opaque: opaque.buffer.slice(0), colors: colors.buffer.slice(0) },
+          {
+            key,
+            origin: [cx * CH, cy * CH, cz * CH],
+            ids: ids.buffer,
+            opaque: opaque.buffer.slice(0),
+            colors: colors.buffer.slice(0),
+            layers: atlas ? atlas.layers.buffer.slice(0) : null,
+          },
           [ids.buffer],
         );
         if (cancelled || !res.quads) return;
@@ -220,6 +254,10 @@ export default function Viewport({ geometry, layerY, onStats, onHover, brush, on
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(res.positions), 3));
         geo.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(res.colors), 3, true));
+        // Les UV ne sont PAS normalisés : ils vont de 0 à la taille du quad, et
+        // c'est `fract` dans le nuanceur qui répète la tuile.
+        geo.setAttribute('tileUv', new THREE.BufferAttribute(new Float32Array(res.uv), 2));
+        geo.setAttribute('tileLayer', new THREE.BufferAttribute(new Float32Array(new Uint16Array(res.layers)), 1));
         geo.setIndex(new THREE.BufferAttribute(new Uint32Array(res.indices), 1));
         geo.computeBoundingSphere();
 

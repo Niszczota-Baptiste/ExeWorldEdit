@@ -1592,6 +1592,61 @@ posé.
 
 ---
 
+## Le build en textures
+
+Le viewport rendait chaque bloc d'une couleur plate. Maintenant que le pack est
+lu pour les icônes, il peut l'être pour le build lui-même.
+
+![Avant / après](images/atlas-avant-apres.png)
+
+*À gauche, les couleurs de repli. À droite, les textures du pack — le dessus
+des blocs d'herbe, la terre sur les marches, le gravier de la falaise.*
+
+### Pourquoi une texture-TABLEAU et pas une planche d'atlas
+
+Le maillage est *greedy* : un quad couvre plusieurs blocs, et sa texture doit
+se **répéter** — pas s'étirer. Sur une planche d'atlas classique, répéter
+déborde sur la tuile voisine ; c'est le défaut connu des atlas, une frange de la
+mauvaise texture au bord de chaque face, qu'on ne rattrape qu'à coups de marges
+et de biais de mipmap.
+
+Une `DataArrayTexture` donne **une couche par tuile**. `fract(uv)` répète sans
+jamais pouvoir sortir de la sienne. Les UV ne sont donc pas normalisés : ils
+vont de 0 à la taille du quad, en unités de bloc.
+
+La **couche 0 est blanche**. Un bloc que le pack ne connaît pas y atterrit, et
+le produit avec sa couleur de sommet redonne exactement le rendu d'avant. Pas de
+branchement dans le nuanceur, pas de second matériau, pas de deuxième passe —
+et sans pack du tout, l'affichage est au pixel près celui d'hier.
+
+### Trois erreurs, dans l'ordre où elles sont sorties
+
+**Le build deux fois trop sombre.** La couleur de sommet portait `teinte du bloc
+× ombrage`. Multipliée par une texture qui porte déjà la teinte, la teinte
+comptait deux fois. Quand une face est texturée, la couleur de sommet ne porte
+plus que l'ombrage.
+
+**Chaque bloc affichait la texture de son voisin.** L'identifiant d'un voxel
+vaut l'indice de palette **plus un** — 0 est réservé à l'air. Une table indexée
+sur la palette décale tout d'un cran. C'est le genre d'erreur qui ne lève
+jamais : elle produit une image, simplement pas la bonne.
+
+**L'herbe sortait en terre.** Et là, la cause n'était pas dans le code écrit ce
+jour-là. `FACE_SHADE` portait le commentaire `−X +X +Y −Y −Z +Z`, alors que le
+mailleur calcule `d * 2 + (front ? 1 : 0)` — donc la face **négative** de chaque
+axe d'abord : `−X +X −Y +Y −Z +Z`. L'ombrage était **inversé depuis toujours**,
+dessous éclairé à plein et dessus assombri. Sur un build gris, personne ne l'a
+vu. Il a fallu poser une texture différente au-dessus et au-dessous d'un bloc
+pour que ça saute aux yeux.
+
+La leçon tient en une ligne : **un ordre d'indices se mesure contre le code qui
+le produit**. Le test ne compare plus `FACES` à une liste écrite à la main — il
+maille un bloc isolé, regarde dans quelle direction pointe chaque quad, et exige
+que l'indice corresponde. Un second test exige que le dessus soit la face la
+plus claire.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
@@ -1818,7 +1873,7 @@ jetable sans toucher au vrai.
 | 2.4d | Écrans « Texte et carte », « Relief », « Bibliothèque » | **fait** — texte par la police embarquée, image en couleurs ou en silhouette, relief à l'aller et au retour, rangement et reprise par le presse-papier du moteur |
 | 2.4c | Commandes complètes et catalogue de blocs | **fait** — les 29 opérations atteignables, champs `blocklist`/`pattern`/`mask`, presse-papier et biome branchés, raccourcis d'outil, catalogue de 346 blocs + `blocks.json` pour les `minefield:*`. Reste : les écrans « Texte et carte », « Relief » et « Bibliothèque », dont le moteur est prêt |
 | 2.4b | Réglages (texte, densité, accent) + mode performance | **fait** — `settings.json` via l'adapter, `theme.js` testé, relevé par phase |
-| 2.5 | Viewport | maillage par chunk + AO **fait** ; atlas de textures et modèles non cubiques à venir |
+| 2.5 | Viewport | maillage par chunk + AO **fait** ; textures du pack **faites** (texture-tableau, répétition sur les quads greedy). Reste : les modèles non cubiques, rendus en cube |
 | 2.6 | Empaquetage | **fait** — installeur NSIS et portable construits sur Windows, paquet Linux construit et lancé. Reste : signature de code (certificat à acheter) |
 | 1.1 | Mesurer | **fait** — `bench/`, 16 scénarios, `RESULTS.md` |
 | 1.2 | Moteur rapide | **fait** — dépack de sections × 10,7, `RegionStore` (set-10M × 6,7), aperçu binaire et incrémental × 11,1 (−82 % sur le total), pool de fils × 2,4 sur `terrain`, plafonds réglables. Reste : aperçu découpé par chunk, `getBlock` sans allocation |

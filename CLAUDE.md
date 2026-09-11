@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (401 tests aujourd'hui : 326 moteur, 75 desktop)
+npm test          # tous les paquets (414 tests aujourd'hui : 329 moteur, 85 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -104,6 +104,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Une chose qui dépend d'où vivent les données | une méthode du `StorageAdapter` + son cas dans la suite de contrat (`test/storage.test.js`) |
 | Un plafond réglable | `DEFAULT_LIMITS` + son entrée dans `LIMIT_RANGES` (`src/staging/geometry.js`), jamais une variable d'environnement. L'interface génère son champ depuis les bornes, il n'y a rien à écrire côté renderer |
 | Une capacité pour le renderer | la méthode dans `apps/desktop/src/engine/index.js`, puis son nom dans `ENGINE_METHODS` du preload |
+| Une texture au viewport | rien à écrire : l'atlas se construit depuis le pack (`viewport/atlas.js`). L'ordre des faces s'y MESURE contre le mailleur, il ne se recopie pas |
 | Un réglage de pinceau | `BRUSH_SHAPES` / `BRUSH_MODES` (`apps/desktop/src/renderer/viewport/brush.js`) — pur, testé sans navigateur |
 | Un écran d'outil (pas une opération) | un composant dans `apps/desktop/src/renderer/shell/tools/`, son entrée dans `TOOL_PANELS` (`Inspector.jsx`), et son bouton principal envoyé dans `ActionSlot` par un portail |
 | Une conversion pixels → grille | `apps/desktop/src/renderer/grid/pixels.js` (pur, testé sans navigateur) ; ce qui touche un canvas va dans `draw.js` |
@@ -265,6 +266,27 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   allocations par bloc pour une palette de dix. Un index `Map` construit une
   fois par section : × 3,5. Corollaire : les opérations parcourent en YZX, donc
   un mémo d'UNE case sur la section résolue supprime les recherches de chunk.
+- **Un commentaire qui ment sur un ordre d'indices.** `FACE_SHADE` annonçait
+  « −X +X +Y −Y » ; le mailleur calcule `d * 2 + (front ? 1 : 0)`, donc la face
+  NÉGATIVE d'abord : « −X +X −Y +Y ». L'ombrage était inversé — dessous éclairé
+  à plein, dessus assombri — depuis le début, invisible sur un build gris. Ça
+  n'est sorti qu'en posant des textures dessus : l'herbe s'affichait en terre.
+  Un ordre d'indices se MESURE contre le code qui le produit, il ne se lit pas
+  dans un commentaire.
+- **Un identifiant de voxel n'est pas un indice de palette.** Il vaut l'indice
+  PLUS UN, parce que 0 est l'air (`buildTables`). Une table indexée sur la
+  palette décale tout d'un cran, et chaque bloc prend la texture de son voisin.
+- **Une texture par-dessus une couleur applique la couleur deux fois.** La
+  couleur de sommet portait `teinte du bloc × ombrage` ; multipliée par une
+  texture qui porte déjà la teinte, tout le build sortait deux fois trop sombre.
+  Quand une face est texturée, la couleur de sommet ne porte plus que
+  l'ombrage.
+- **Répéter une texture d'atlas déborde sur la voisine.** Le maillage est
+  greedy : un quad couvre plusieurs blocs et sa texture doit se répéter. Sur une
+  planche d'atlas, `fract` sort de la tuile — d'où la frange classique de la
+  mauvaise texture au bord des faces. Une texture-TABLEAU
+  (`DataArrayTexture`) donne une couche par tuile : la répétition ne peut pas en
+  sortir.
 - **Trois coordonnées ne tiennent pas dans 53 bits.** La clé entière du
   dédoublonnage d'un trait (21 bits par axe) dépassait `MAX_SAFE_INTEGER` : les
   arrondis faisaient collisionner des cases distinctes — vingt-sept rendues

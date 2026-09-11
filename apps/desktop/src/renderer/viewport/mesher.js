@@ -22,7 +22,13 @@ const pIdx = (x, y, z) => ((y + PAD) * P + (z + PAD)) * P + (x + PAD);
 // Ombrage par direction de face, façon Minecraft : le haut prend la lumière,
 // le dessous la perd, et les deux axes horizontaux se distinguent pour que les
 // arêtes d'un mur restent lisibles.
-const FACE_SHADE = [0.80, 0.80, 1.00, 0.52, 0.66, 0.66]; // -X +X +Y -Y -Z +Z
+//
+// L'ORDRE est `d * 2 + (front ? 1 : 0)`, donc la face NÉGATIVE de chaque axe
+// vient en premier : −X +X −Y +Y −Z +Z. Le commentaire d'origine annonçait
+// « +Y −Y » et la table suivait : le dessous des blocs était éclairé à plein et
+// le dessus assombri. Ça ne saute pas aux yeux sur un build gris, mais un
+// terrain en terrasses montrait bien ses marches plus claires que ses plats.
+const FACE_SHADE = [0.80, 0.80, 0.52, 1.00, 0.66, 0.66]; // −X +X −Y +Y −Z +Z
 const AO_LEVELS = [0.46, 0.66, 0.84, 1.00];
 
 /** Occlusion d'un coin : deux côtés pleins qui se rejoignent = coin le plus sombre. */
@@ -35,12 +41,21 @@ function cornerAO(side1, side2, corner) {
  * @param {Uint16Array} ids 18³ d'identifiants de palette (0 = air)
  * @param {Uint8Array} opaque table id → 1 si le bloc cache ce qu'il y a derrière
  * @param {Uint8Array} colors table id*3 → rgb
+ * @param {Uint16Array} [layers] table `id * 6 + face` → couche de l'atlas.
+ *   Absente, tout va sur la couche 0 — qui est BLANCHE, donc le produit avec la
+ *   couleur de sommet redonne exactement le rendu sans textures. Pas de
+ *   branchement dans le nuanceur, pas de second matériau.
  */
-export function meshChunk(ids, opaque, colors) {
+export function meshChunk(ids, opaque, colors, layers) {
   const positions = [];
   const shades = [];
   const rgb = [];
   const indices = [];
+  // UV et couche : deux attributs de plus par sommet. Les UV vont de 0 à la
+  // TAILLE du quad — un quad greedy couvre plusieurs blocs, et c'est la
+  // répétition de la texture qui doit suivre, pas son étirement.
+  const uv = [];
+  const lay = [];
 
   const at = (x, y, z) => ids[pIdx(x, y, z)];
   const solid = (x, y, z) => opaque[ids[pIdx(x, y, z)]];
@@ -126,7 +141,7 @@ export function meshChunk(ids, opaque, colors) {
           const id = Math.abs(m);
           const face = d * 2 + (front ? 1 : 0);
           emitQuad({
-            positions, shades, rgb, indices, colors,
+            positions, shades, rgb, uv, lay, indices, colors, layers,
             d, u, v, i, j, w, h,
             base: slice + 1,
             front, id, face,
@@ -144,13 +159,15 @@ export function meshChunk(ids, opaque, colors) {
   return {
     positions: new Float32Array(positions),
     colors: new Uint8Array(rgb),
+    uv: new Float32Array(uv),
+    layers: new Uint16Array(lay),
     indices: new Uint32Array(indices),
     quads: indices.length / 6,
     shades,
   };
 }
 
-function emitQuad({ positions, rgb, indices, colors, d, u, v, i, j, w, h, base, front, id, face, ao }) {
+function emitQuad({ positions, rgb, uv, lay, indices, colors, layers, d, u, v, i, j, w, h, base, front, id, face, ao }) {
   const p = [0, 0, 0];
   p[d] = base; p[u] = i; p[v] = j;
   const du = [0, 0, 0]; du[u] = w;
@@ -165,8 +182,21 @@ function emitQuad({ positions, rgb, indices, colors, d, u, v, i, j, w, h, base, 
   ];
   for (const c of corners) positions.push(c[0], c[1], c[2]);
 
+  // UV en unités de BLOC : le nuanceur répète la texture par `fract`, donc un
+  // quad de 5 × 3 blocs montre cinq fois trois tuiles au lieu d'une étirée.
+  uv.push(0, 0, w, 0, w, h, 0, h);
+  const couche = layers ? layers[id * 6 + face] : 0;
+  for (let c = 0; c < 4; c++) lay.push(couche);
+
   const shade = FACE_SHADE[face];
-  const r = colors[id * 3], g = colors[id * 3 + 1], b = colors[id * 3 + 2];
+  // Quand une TEXTURE couvre la face, la couleur de sommet ne porte plus que
+  // l'ombrage. Sinon la couleur du bloc est appliquée deux fois — une fois
+  // comme teinte de repli, une fois dans la texture — et tout le build sort
+  // deux fois trop sombre. Vu sur la première comparaison avant/après.
+  const texture = couche !== 0;
+  const r = texture ? 255 : colors[id * 3];
+  const g = texture ? 255 : colors[id * 3 + 1];
+  const b = texture ? 255 : colors[id * 3 + 2];
   for (let c = 0; c < 4; c++) {
     const k = shade * AO_LEVELS[ao[c]];
     rgb.push(Math.min(255, r * k) | 0, Math.min(255, g * k) | 0, Math.min(255, b * k) | 0);

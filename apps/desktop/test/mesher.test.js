@@ -194,3 +194,87 @@ test('deux chunks adjacents pleins ne produisent aucune face entre eux', () => {
   // n'en reste que 5. Sans le padding, la frontière afficherait un mur.
   assert.equal(m.quads, 5);
 });
+
+test('un quad greedy porte des UV en unités de BLOC', async () => {
+  // Un quad greedy couvre plusieurs blocs. Des UV de 0 à 1 étireraient UNE
+  // tuile sur toute la surface — un mur de cinq blocs montrerait une pierre
+  // géante au lieu de cinq pierres.
+  const { meshChunk, P } = await import('../src/renderer/viewport/mesher.js');
+  const ids = new Uint16Array(P * P * P);
+  const opaque = Uint8Array.from([0, 1]);
+  const colors = Uint8Array.from([0, 0, 0, 200, 200, 200]);
+  // Une barre de 5 × 1 × 1 : sa face du dessus est un seul quad de 5 × 1.
+  const at = (x, y, z) => ((y + 1) * P + (z + 1)) * P + (x + 1);
+  for (let x = 0; x < 5; x++) ids[at(x, 0, 0)] = 1;
+
+  const out = meshChunk(ids, opaque, colors);
+  assert.ok(out.uv.length, 'des UV sont émis');
+  assert.equal(out.uv.length / 2, out.positions.length / 3, 'un UV par sommet');
+  // Au moins un quad s'étend sur cinq blocs dans une direction.
+  const max = Math.max(...out.uv);
+  assert.equal(max, 5, `le plus grand UV doit valoir la longueur de la barre, pas 1 (vu ${max})`);
+});
+
+test('sans table de couches, tout va sur la couche 0', async () => {
+  // La couche 0 est BLANCHE : le produit avec la couleur de sommet redonne
+  // exactement le rendu d'avant les textures. Pas de branchement dans le
+  // nuanceur, pas de second matériau.
+  const { meshChunk, P } = await import('../src/renderer/viewport/mesher.js');
+  const ids = new Uint16Array(P * P * P);
+  ids[((1) * P + 1) * P + 1] = 1;
+  const out = meshChunk(ids, Uint8Array.from([0, 1]), Uint8Array.from([0, 0, 0, 9, 9, 9]));
+  assert.equal(out.layers.length, out.positions.length / 3);
+  assert.ok(out.layers.every((l) => l === 0));
+});
+
+test('la couche suit le bloc ET la face', async () => {
+  // Le dessus d'un bloc d'herbe n'est pas sa tranche : une couche par face,
+  // sinon un build entier prend la texture de son dessus.
+  const { meshChunk, P } = await import('../src/renderer/viewport/mesher.js');
+  const ids = new Uint16Array(P * P * P);
+  ids[((1) * P + 1) * P + 1] = 1;
+  const layers = new Uint16Array(2 * 6);
+  // −X +X +Y −Y −Z +Z → on distingue le dessus (face 2) du reste.
+  for (let f = 0; f < 6; f++) layers[1 * 6 + f] = f === 2 ? 7 : 3;
+  const out = meshChunk(ids, Uint8Array.from([0, 1]), Uint8Array.from([0, 0, 0, 9, 9, 9]), layers);
+  const vues = new Set(out.layers);
+  assert.deepEqual([...vues].sort((a, b) => a - b), [3, 7]);
+});
+
+test('une face TEXTURÉE ne porte que l’ombrage dans sa couleur', async () => {
+  // Sinon la couleur du bloc est appliquée deux fois — une fois comme teinte
+  // de repli, une fois dans la texture — et le build entier sort deux fois trop
+  // sombre. C'est ce que montrait la première comparaison avant/après.
+  const { meshChunk, P } = await import('../src/renderer/viewport/mesher.js');
+  const ids = new Uint16Array(P * P * P);
+  ids[((1) * P + 1) * P + 1] = 1;
+  const opaque = Uint8Array.from([0, 1]);
+  // Un bloc très sombre : si sa couleur restait, la face serait presque noire.
+  const colors = Uint8Array.from([0, 0, 0, 20, 30, 40]);
+
+  const sansTexture = meshChunk(ids, opaque, colors);
+  const layers = new Uint16Array(2 * 6).fill(5);
+  const avecTexture = meshChunk(ids, opaque, colors, layers);
+
+  const maxSans = Math.max(...sansTexture.colors);
+  const maxAvec = Math.max(...avecTexture.colors);
+  assert.ok(maxSans <= 40, `sans texture, la couleur du bloc est portée (vu ${maxSans})`);
+  assert.ok(maxAvec > 200, `avec texture, la couleur ne porte que l’ombrage (vu ${maxAvec})`);
+
+  // Et l'ombrage est bien LÀ : une face du dessous doit rester plus sombre
+  // qu'une face du dessus, texture ou pas.
+  assert.ok(Math.min(...avecTexture.colors) < 200, 'l’ombrage n’est pas perdu');
+});
+
+test('la couche 0 garde la couleur du bloc', async () => {
+  // La couche 0 est blanche : c'est le repli d'un bloc que le pack ne connaît
+  // pas, et il doit rendre exactement comme avant les textures.
+  const { meshChunk, P } = await import('../src/renderer/viewport/mesher.js');
+  const ids = new Uint16Array(P * P * P);
+  ids[((1) * P + 1) * P + 1] = 1;
+  const colors = Uint8Array.from([0, 0, 0, 20, 30, 40]);
+  const layers = new Uint16Array(2 * 6); // tout à 0
+  const a = meshChunk(ids, Uint8Array.from([0, 1]), colors);
+  const b = meshChunk(ids, Uint8Array.from([0, 1]), colors, layers);
+  assert.deepEqual([...a.colors], [...b.colors]);
+});

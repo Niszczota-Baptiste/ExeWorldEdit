@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  modeleDuBloc, aplatitModele, resoutTexture, estCubePlein, planIcone, FACES_VUES,
+  modeleDuBloc, aplatitModele, resoutTexture, estCubePlein, planIcone, planFaces,
+  FACES_VUES, FACES_CUBE,
 } from '../src/worldedit/resourcePack.js';
 
 // Pas de pack de ressources dans le dépôt — on ne peut pas y embarquer les
@@ -149,4 +150,36 @@ test('un modèle sans elements hérite de la forme d’un cube', () => {
   const plan = planIcone(p, 'minefield:brique');
   assert.equal(plan.kind, 'cube');
   assert.equal(plan.textures['#all'], 'assets/minefield/textures/block/brique.png');
+});
+
+test('les SIX faces sont résolues, pour le rendu du build', () => {
+  // L'icône n'a besoin que des trois faces visibles ; le viewport les voit
+  // toutes — on tourne autour d'un build.
+  const p = pack(VANILLA);
+  const f = planFaces(p, 'minecraft:grass_block');
+  assert.deepEqual(Object.keys(f).sort(), FACES_CUBE.slice().sort());
+  assert.equal(f.up, 'assets/minecraft/textures/block/grass_block_top.png');
+  assert.equal(f.north, 'assets/minecraft/textures/block/grass_block_side.png');
+  // `down` n'est pas dans les faces visibles d'une icône, mais un build a un
+  // dessous — et il vaut `dirt` ici, pas l'herbe.
+  assert.equal(f.down, 'assets/minecraft/textures/block/dirt.png');
+});
+
+test('une face sans texture propre prend celle du bloc', () => {
+  // Le mailleur ne sait rendre que des cubes pleins : un escalier ou un quart
+  // de bloc en est un pour lui, et il lui faut une réponse pour chaque face.
+  const p = pack({
+    'assets/minefield/blockstates/quart.json': { variants: { '': { model: 'minefield:block/quart' } } },
+    'assets/minefield/models/block/quart.json': {
+      textures: { all: 'minefield:block/muraille' },
+      elements: [{ from: [0, 0, 0], to: [8, 8, 16], faces: { up: { texture: '#all' } } }],
+    },
+  });
+  const f = planFaces(p, 'minefield:quart');
+  assert.equal(Object.keys(f).length, FACES_CUBE.length, 'les six, pas seulement `up`');
+  for (const face of FACES_CUBE) assert.equal(f[face], 'assets/minefield/textures/block/muraille.png');
+});
+
+test('un bloc absent du pack n’a pas de faces', () => {
+  assert.equal(planFaces(pack(VANILLA), 'minefield:rien'), null);
 });

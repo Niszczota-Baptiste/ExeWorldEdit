@@ -16,7 +16,7 @@ import { CATALOG, GROUPS, normalizeExtras } from '@titi/we-engine/blocks';
 import { renderTextSvg } from '@titi/we-engine/worldedit';
 import { flatBlockColors } from '@titi/we-engine/colors';
 import { safeFileNameExt } from '@titi/we-engine/filename';
-import { planIcone, pickLatestVersion, orderPacks, pileComplete } from '@titi/we-engine/worldedit';
+import { planIcone, planFaces, pickLatestVersion, orderPacks, pileComplete } from '@titi/we-engine/worldedit';
 import { zipIndex, zipRead } from '@titi/we-engine/worldedit';
 import { PANEL_PRESETS } from '@titi/we-engine/staging';
 
@@ -752,6 +752,47 @@ const methods = {
         if (buf) textures[cle] = `data:image/png;base64,${buf.toString('base64')}`;
       }
       out[id] = Object.keys(textures).length ? { kind: plan.kind, elements: plan.elements, textures } : null;
+    }
+    return out;
+  },
+
+  /**
+   * Textures des SIX faces d'un lot de blocs, pour l'atlas du viewport.
+   *
+   * Distinct de `blockIcons` : l'icône n'a besoin que des trois faces visibles
+   * et de la géométrie du modèle ; le viewport voit toutes les faces et ne
+   * rend que des cubes. Une même méthode rendrait trop à l'un et pas assez à
+   * l'autre.
+   */
+  blockFaces: ({ ids }) => {
+    const chemins = cheminsPack();
+    if (!chemins.length) return {};
+    let pack;
+    try { pack = ouvrePile(chemins); } catch { return {}; }
+
+    const out = {};
+    // Le cache de fichiers est PARTAGÉ par tous les blocs du lot : `stone.png`
+    // sert des dizaines de blocs, et un build ordinaire le redemanderait deux
+    // cents fois.
+    const cache = new Map();
+    const lire = (fichier) => {
+      if (cache.has(fichier)) return cache.get(fichier);
+      const buf = pack.read(fichier);
+      const url = buf ? `data:image/png;base64,${buf.toString('base64')}` : null;
+      cache.set(fichier, url);
+      return url;
+    };
+
+    for (const id of (Array.isArray(ids) ? ids : []).slice(0, 2048)) {
+      let faces;
+      try { faces = planFaces(pack, id); } catch { faces = null; }
+      if (!faces) continue;
+      const sorties = {};
+      for (const [face, fichier] of Object.entries(faces)) {
+        const url = lire(fichier);
+        if (url) sorties[face] = url;
+      }
+      if (Object.keys(sorties).length) out[id] = sorties;
     }
     return out;
   },

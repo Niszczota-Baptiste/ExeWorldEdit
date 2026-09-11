@@ -139,6 +139,47 @@ const estPlein = (e) => {
  */
 export const estCubePlein = (elements) => Array.isArray(elements) && elements.length === 1 && estPlein(elements[0]);
 
+/** Les six faces d'un cube, dans l'ordre du mailleur : −X +X +Y −Y −Z +Z. */
+export const FACES_CUBE = ['west', 'east', 'up', 'down', 'north', 'south'];
+
+/**
+ * Texture de CHAQUE face d'un bloc, pour le rendu du build lui-même.
+ *
+ * L'icône n'a besoin que des trois faces visibles ; le viewport les voit toutes
+ * — on tourne autour d'un build. Et il lui faut une réponse pour chaque face,
+ * même quand le modèle n'en déclare pas : le mailleur ne sait rendre que des
+ * cubes pleins (escaliers et quarts de bloc le sont pour lui), donc une face
+ * sans texture propre prend celle du bloc.
+ *
+ * @returns {Record<string, string>|null} face → chemin de fichier
+ */
+export function planFaces(pack, id) {
+  const ref = modeleDuBloc(pack, id);
+  if (!ref) return null;
+  const { textures, elements } = aplatitModele(pack, ref);
+
+  // Le premier cuboïde sert de référence : c'est celui qui porte les textures
+  // principales d'un bloc, cube plein comme escalier.
+  const faces = elements?.[0]?.faces || {};
+
+  // Repli, dans l'ordre où les modèles du jeu déclarent leurs textures.
+  let defaut = null;
+  for (const cle of ['all', 'texture', 'side', 'end', 'top', 'particle']) {
+    defaut = resoutTexture(textures, cle);
+    if (defaut) break;
+  }
+
+  const out = {};
+  for (const f of FACES_CUBE) {
+    const ref2 = faces[f]?.texture;
+    const cle = typeof ref2 === 'string' && ref2.startsWith('#') ? ref2.slice(1) : null;
+    const chemin = cle ? resoutTexture(textures, cle) : (typeof ref2 === 'string' ? ref2 : null);
+    const fin = chemin || resoutTexture(textures, f) || defaut;
+    if (fin) out[f] = cheminTexture(fin);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 /**
  * Ce qu'il faut pour dessiner l'icône d'un bloc : sa géométrie et les chemins
  * de ses textures. Le rendu lui-même appartient à qui a un canvas — pas au
