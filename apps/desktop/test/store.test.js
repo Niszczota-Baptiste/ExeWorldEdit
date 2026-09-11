@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { OPERATIONS, OPERATION_IDS } from '@titi/we-engine/operations';
-import { TOOLS, TOOL_OPS, ERREURS } from '../src/renderer/store.js';
+import { ERREURS } from '../src/renderer/store.js';
+import { TOOLS, TOOL_OPS } from '../src/renderer/tools.js';
 
 // Le descripteur du moteur génère l'inspecteur : une opération qu'il déclare
 // sans qu'aucun outil ne la propose existe, marche, est testée — et reste
@@ -99,7 +100,7 @@ test('changer d’outil change d’opération pour une des siennes', async () =>
 });
 
 test('un outil sans opérations a une note qui dit ce qu’il fait', async () => {
-  const { TOOL_NOTES } = await import('../src/renderer/store.js');
+  const { TOOL_NOTES } = await import('../src/renderer/tools.js');
   for (const t of TOOLS) {
     if (TOOL_OPS[t.id]?.length) continue;
     assert.ok(TOOL_NOTES[t.id]?.text, `${t.id} : ni opérations ni explication — l’inspecteur resterait muet`);
@@ -110,7 +111,7 @@ test('le rail marque « bientôt » exactement les outils que l’inspecteur dit
   // Deux affichages de la même vérité : le rail grise le bouton, l'inspecteur
   // met « À venir ». Qu'ils divergent, et l'utilisateur clique sur un outil
   // annoncé prêt pour lire qu'il ne l'est pas.
-  const { TOOL_NOTES } = await import('../src/renderer/store.js');
+  const { TOOL_NOTES } = await import('../src/renderer/tools.js');
   for (const t of TOOLS) {
     assert.equal(!!t.soon, !!TOOL_NOTES[t.id]?.soon, `${t.id} : le rail et l’inspecteur ne disent pas la même chose`);
   }
@@ -125,15 +126,19 @@ test('les raccourcis d’outil sont uniques et réellement écoutés', async () 
     assert.equal(vus.has(t.key), false, `raccourci « ${t.key} » partagé par ${vus.get(t.key)} et ${t.id}`);
     vus.set(t.key, t.id);
   }
+  // Et l'application les lit dans la TABLE des raccourcis, réassignable, au
+  // lieu de comparer des touches écrites en dur : sinon réassigner dans les
+  // réglages ne changerait rien.
   const app = await readFile(new URL('../src/renderer/App.jsx', import.meta.url), 'utf8');
-  assert.match(app, /TOOLS\.find\(/, 'App.jsx doit dériver les raccourcis de TOOLS, pas les recopier');
+  assert.match(app, /actionForEvent\(keys, e\)/, 'App.jsx doit passer par la table des raccourcis');
+  assert.doesNotMatch(app, /e\.key\.toLowerCase\(\) === '/, 'plus aucune touche comparée en dur');
 });
 
 test('un outil sans opérations a soit son écran, soit une note « à venir »', async () => {
   // Trois états possibles et pas quatre : des opérations du moteur, un écran à
   // lui, ou l'aveu qu'il ne fait rien encore. Un outil qui n'a aucun des trois
   // ouvre un panneau vide.
-  const { TOOL_NOTES } = await import('../src/renderer/store.js');
+  const { TOOL_NOTES } = await import('../src/renderer/tools.js');
   const src = await readFile(new URL('../src/renderer/shell/Inspector.jsx', import.meta.url), 'utf8');
   const avecEcran = new Set([...src.matchAll(/^\s{2}(\w+): \w+Tool,$/gm)].map((m) => m[1]));
   assert.ok(avecEcran.size >= 3, `TOOL_PANELS illisible depuis Inspector.jsx (${avecEcran.size} trouvés)`);

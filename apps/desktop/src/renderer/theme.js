@@ -15,6 +15,12 @@ export const DEFAULT_SETTINGS = {
   uiScale: 1,
   /** Mode performance : relevé par phase des opérations, affiché en direct. */
   perf: false,
+  /**
+   * Raccourcis clavier. Leur forme et leurs défauts vivent dans `keys.js` —
+   * ici on ne garde que la case où ils se rangent, pour que `readSettings` /
+   * `writeSettings` les persistent comme le reste.
+   */
+  keys: {},
 };
 
 /** Bornes des curseurs. Au-delà, l'interface se casse — autant refuser avant. */
@@ -110,6 +116,10 @@ export function normalizeSettings(raw = {}) {
     textScale: num(raw?.textScale, RANGES.textScale, DEFAULT_SETTINGS.textScale),
     uiScale: num(raw?.uiScale, RANGES.uiScale, DEFAULT_SETTINGS.uiScale),
     perf: raw?.perf === true,
+    // Recopiés TELS QUELS. Leur validation vit dans `keys.js`, qui connaît la
+    // liste des actions ; l'importer ici ferait un cycle (keys → store →
+    // theme). Ce module ne s'occupe que de l'apparence.
+    keys: (raw?.keys && typeof raw.keys === 'object' && !Array.isArray(raw.keys)) ? { ...raw.keys } : {},
   };
 }
 

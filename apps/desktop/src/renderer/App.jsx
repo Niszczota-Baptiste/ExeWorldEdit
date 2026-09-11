@@ -11,7 +11,8 @@ import WorldPicker from './shell/WorldPicker.jsx';
 import Settings from './shell/Settings.jsx';
 import PerfPanel from './shell/PerfPanel.jsx';
 import Viewport from './viewport/Viewport.jsx';
-import { useApp, TOOLS } from './store.js';
+import { useApp } from './store.js';
+import { actionForEvent } from './keys.js';
 
 export default function App() {
   const geometry = useApp((s) => s.geometry);
@@ -31,6 +32,7 @@ export default function App() {
   const setSettingsOpen = useApp((s) => s.setSettingsOpen);
   const run = useApp((s) => s.run);
   const setTool = useApp((s) => s.setTool);
+  const keys = useApp((s) => s.keys);
   const [dropping, setDropping] = useState(false);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -75,25 +77,35 @@ export default function App() {
   useEffect(() => {
     const onKey = (e) => {
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
-      if (e.code === 'Space' && !typing && !e.repeat) { e.preventDefault(); setWheel(true); }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') { e.preventDefault(); open(); }
-      if ((e.ctrlKey || e.metaKey) && e.key === ',') { e.preventDefault(); setSettingsOpen(true); }
-      // Copier / coller : les raccourcis que tout le monde essaie en premier.
-      // `typing` les laisse au champ de saisie qui a le focus.
-      if ((e.ctrlKey || e.metaKey) && !typing && e.key.toLowerCase() === 'c') { e.preventDefault(); run('copy', {}); }
-      if ((e.ctrlKey || e.metaKey) && !typing && e.key.toLowerCase() === 'v') { e.preventDefault(); run('paste', { mode: 'overlay' }); }
-      // Raccourcis d'outil. Le rail les AFFICHE depuis toujours dans ses
-      // infobulles ; rien ne les écoutait. Lus depuis `TOOLS` et pas recopiés
-      // ici, pour qu'ajouter un outil suffise.
-      if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const t = TOOLS.find((x) => x.key.toLowerCase() === e.key.toLowerCase());
-        if (t) { e.preventDefault(); setTool(t.id); }
+      // UNE table, celle des réglages. Avant, les combinaisons étaient écrites
+      // en dur ici et les lettres d'outil dans `TOOLS` : rien de réassignable,
+      // et rien qui empêchait deux actions de partager une touche.
+      const action = actionForEvent(keys, e);
+      if (!action) return;
+
+      // La roue se MAINTIENT : c'est le seul raccourci qui se répète, donc le
+      // seul qui doit filtrer `e.repeat`.
+      if (action === 'wheel') {
+        if (!typing && !e.repeat) { e.preventDefault(); setWheel(true); }
+        return;
       }
+      // Ce qui se tape dans un champ appartient au champ. Les raccourcis de
+      // l'application n'y touchent pas — sauf ceux qui ont un modificateur et
+      // qu'aucun champ n'utilise (ouvrir, réglages).
+      if (typing && !['open', 'settings'].includes(action)) return;
+
+      e.preventDefault();
+      if (action.startsWith('tool.')) { setTool(action.slice(5)); return; }
+      if (action === 'undo') undo();
+      else if (action === 'redo') redo();
+      else if (action === 'open') open();
+      else if (action === 'settings') setSettingsOpen(true);
+      else if (action === 'copy') run('copy', {});
+      else if (action === 'paste') run('paste', { mode: 'overlay' });
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setWheel, undo, redo, open, setSettingsOpen, run, setTool]);
+  }, [keys, setWheel, undo, redo, open, setSettingsOpen, run, setTool]);
 
   const minY = geometry?.min.y ?? 0;
   const maxY = geometry ? geometry.min.y + geometry.size.y - 1 : 0;

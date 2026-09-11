@@ -1,6 +1,8 @@
 import * as Icons from './icons.js';
 import * as Tooltip from '@radix-ui/react-tooltip';
-import { useApp, TOOLS } from '../store.js';
+import { useApp } from '../store.js';
+import { TOOLS } from '../tools.js';
+import { describeBinding } from '../keys.js';
 
 // Rail d'outils. Il ne porte que des icônes : les libellés vivent dans
 // l'infobulle et dans la roue radiale, pour que la colonne reste étroite et
@@ -9,6 +11,7 @@ import { useApp, TOOLS } from '../store.js';
 export default function ToolRail() {
   const tool = useApp((s) => s.tool);
   const setTool = useApp((s) => s.setTool);
+  const keys = useApp((s) => s.keys);
   const open = useApp((s) => s.open);
   const openWorld = useApp((s) => s.openWorld);
 
@@ -47,7 +50,12 @@ export default function ToolRail() {
                 <Tooltip.Portal>
                   <Tooltip.Content className="chip" side="right" sideOffset={8}>
                     <b>{t.label}</b>
-                    {t.soon ? <span>· bientôt</span> : <kbd style={{ opacity: 0.7 }}>{t.key}</kbd>}
+                    {t.soon
+                      ? <span>· bientôt</span>
+                      // La liaison EFFECTIVE : afficher `t.key` alors que la
+                      // touche a été réassignée annonce un raccourci qui ne
+                      // marche pas.
+                      : describeBinding(keys[`tool.${t.id}`]).map((k) => <kbd key={k} style={{ opacity: 0.7 }}>{k}</kbd>)}
                   </Tooltip.Content>
                 </Tooltip.Portal>
               </Tooltip.Root>

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Settings2, Gauge, Type, Layers, RotateCcw, Boxes } from './icons.js';
+import { Settings2, Gauge, Type, Layers, RotateCcw, Boxes, Ruler, AlertTriangle } from './icons.js';
 import { useApp } from '../store.js';
 import { ACCENTS, RANGES, DEFAULT_SETTINGS } from '../theme.js';
+import { ACTIONS, KEY_GROUPS, DEFAULT_KEYS, describeBinding, bindingFromEvent, keyConflicts } from '../keys.js';
 
 // Réglages de l'atelier : lisibilité, densité, couleur, mode performance.
 //
@@ -21,6 +22,9 @@ export default function Settings() {
   const limits = useApp((s) => s.limits);
   const limitRanges = useApp((s) => s.limitRanges);
   const updateLimits = useApp((s) => s.updateLimits);
+  const keys = useApp((s) => s.keys);
+  const setKey = useApp((s) => s.setKey);
+  const resetKeys = useApp((s) => s.resetKeys);
 
   if (!open) return null;
 
@@ -122,6 +126,22 @@ export default function Settings() {
             )}
           </Section>
 
+          <Section icon={<Ruler size={12} />} title="Raccourcis clavier">
+            <p className="hint" style={{ marginTop: 0 }}>
+              Clique une touche pour la réassigner, puis tape la combinaison.{' '}
+              <kbd>Échap</kbd> annule.
+            </p>
+            <Raccourcis keys={keys} onSet={setKey} />
+            <button
+              className="btn"
+              style={{ marginTop: 8 }}
+              onClick={resetKeys}
+              disabled={ACTIONS.every((a) => keys[a.id] === DEFAULT_KEYS[a.id])}
+            >
+              <RotateCcw size={13} /> Raccourcis d’origine
+            </button>
+          </Section>
+
           <Section icon={<Boxes size={12} />} title="Plafonds du moteur">
             <p className="hint" style={{ marginTop: 0 }}>
               Ce que la machine peut encaisser. Les relever permet de travailler
@@ -160,6 +180,69 @@ export default function Settings() {
         </footer>
       </div>
     </div>
+  );
+}
+
+/**
+ * La table des raccourcis, groupée comme `keys.js` les déclare.
+ *
+ * Les conflits sont SIGNALÉS et non empêchés : réassigner passe forcément par
+ * un état où deux actions partagent une touche, et obliger à libérer d'abord
+ * est une gymnastique que personne ne fait.
+ */
+function Raccourcis({ keys, onSet }) {
+  const [capture, setCapture] = useState(null);
+  const conflits = keyConflicts(keys);
+  const enConflit = new Set(Object.values(conflits).flat());
+
+  return (
+    <>
+      {KEY_GROUPS.map((groupe) => (
+        <div key={groupe} style={{ marginBottom: 10 }}>
+          <div className="hint" style={{ margin: '10px 0 4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{groupe}</div>
+          {ACTIONS.filter((a) => a.group === groupe).map((a) => (
+            <div key={a.id} className="row" style={{ alignItems: 'center', marginBottom: 3 }}>
+              <span style={{ flex: 1, fontSize: 'var(--t-small)', color: 'var(--text-dim)' }}>{a.label}</span>
+              {enConflit.has(a.id) && (
+                <AlertTriangle size={12} style={{ color: 'var(--select)', flex: 'none' }} aria-label="Touche partagée" />
+              )}
+              <button
+                className="btn key-btn"
+                data-capture={capture === a.id || undefined}
+                aria-label={`Raccourci de ${a.label}`}
+                onClick={() => setCapture(capture === a.id ? null : a.id)}
+                onKeyDown={(e) => {
+                  if (capture !== a.id) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.key === 'Escape') { setCapture(null); return; }
+                  const b = bindingFromEvent(e);
+                  // Un modificateur seul n'est pas une frappe : on reste en
+                  // capture pendant que la main se pose sur la combinaison.
+                  if (!b) return;
+                  onSet(a.id, b);
+                  setCapture(null);
+                }}
+              >
+                {capture === a.id
+                  ? <span style={{ color: 'var(--accent)' }}>tape…</span>
+                  : describeBinding(keys[a.id]).map((k) => <kbd key={k}>{k}</kbd>)}
+              </button>
+            </div>
+          ))}
+        </div>
+      ))}
+      {Object.keys(conflits).length > 0 && (
+        <p className="hint" data-tone="select" style={{ marginTop: 0 }}>
+          {Object.entries(conflits).map(([b, ids]) => (
+            <span key={b} style={{ display: 'block' }}>
+              <b>{describeBinding(b).join(' ')}</b> — {ids.map((id) => ACTIONS.find((a) => a.id === id)?.label).join(', ')}.
+              La première de la liste répondra.
+            </span>
+          ))}
+        </p>
+      )}
+    </>
   );
 }
 

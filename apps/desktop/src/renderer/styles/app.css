@@ -314,6 +314,10 @@
    un bouton à la largeur par défaut mangeait le champ du bloc, qui se lisait
    « minecraft:st… ». */
 .btn-icon { width: var(--ctl-h); padding: 0; flex: none; }
+/* Une touche assignable : largeur stable pour que la liste ne danse pas quand
+   « Ctrl Maj Z » remplace « V ». */
+.key-btn { min-width: 108px; justify-content: center; gap: 3px; flex: none; }
+.key-btn[data-capture] { border-color: var(--accent); background: var(--accent-wash); }
 
 /* L'ACTION reste visible quoi qu'il arrive.
    Le formulaire d'une opération grandit avec ses paramètres : « Mélange »

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Icons from './icons.js';
-import { useApp, TOOLS } from '../store.js';
+import { useApp } from '../store.js';
+import { TOOLS } from '../tools.js';
 
 // L'élément signature : la roue d'outils radiale.
 //

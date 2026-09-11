@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Play, Settings2, Undo2, Redo2, FileDown, Globe, AlertTriangle, Plus, Minus } from './icons.js';
 import { OPERATIONS } from '@titi/we-engine/operations';
-import { useApp, TOOL_OPS, TOOLS, TOOL_NOTES } from '../store.js';
+import { useApp } from '../store.js';
+import { TOOL_OPS, TOOLS, TOOL_NOTES } from '../tools.js';
 import PanelTool from './tools/PanelTool.jsx';
 import HeightmapTool from './tools/HeightmapTool.jsx';
 import LibraryTool from './tools/LibraryTool.jsx';
