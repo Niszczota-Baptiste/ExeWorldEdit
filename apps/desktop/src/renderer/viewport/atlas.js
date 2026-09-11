@@ -84,9 +84,14 @@ export async function atlasLayers(palette, faces, coucheDe) {
  *
  * @param {{name:string}[]} palette palette de l'aperçu, dans l'ordre des ids
  * @param {Record<string, Record<string,string>>} faces nom de bloc → face → `data:`
- * @returns {Promise<{texture: THREE.DataArrayTexture, layers: Uint16Array, count: number}>}
+ * @param {string[]} [extras] textures à charger EN PLUS : celles des faces de
+ *   modèle, qui ne passent pas par la table `id * 6 + face` mais doivent vivre
+ *   dans le même atlas. Un second atlas voudrait un second matériau, donc un
+ *   appel de dessin de plus par chunk.
+ * @returns {Promise<{texture, layers, count, coucheDe: (src:string) => number}>}
+ *   `coucheDe` est SYNCHRONE : tout est déjà chargé quand il est rendu.
  */
-export async function buildAtlas(palette, faces) {
+export async function buildAtlas(palette, faces, extras = []) {
   // Couche 0 : blanche, le neutre du produit.
   const tuiles = [new Uint8ClampedArray(TUILE * TUILE * 4).fill(255)];
   const parSource = new Map();
@@ -107,6 +112,9 @@ export async function buildAtlas(palette, faces) {
   };
 
   const layers = await atlasLayers(palette, faces, coucheDe);
+  // Séquentiel comme ci-dessus, et pour la même raison : c'est l'ORDRE des
+  // appels qui fixe le numéro des couches.
+  for (const src of extras) await coucheDe(src);
 
   const data = new Uint8Array(TUILE * TUILE * 4 * tuiles.length);
   tuiles.forEach((t, i) => data.set(t, i * TUILE * TUILE * 4));
@@ -121,7 +129,7 @@ export async function buildAtlas(palette, faces) {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
 
-  return { texture, layers, count: tuiles.length };
+  return { texture, layers, count: tuiles.length, coucheDe: (src) => parSource.get(src) || 0 };
 }
 
 /**

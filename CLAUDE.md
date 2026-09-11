@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (429 tests aujourd'hui : 329 moteur, 100 desktop)
+npm test          # tous les paquets (445 tests aujourd'hui : 336 moteur, 109 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -105,6 +105,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Un plafond réglable | `DEFAULT_LIMITS` + son entrée dans `LIMIT_RANGES` (`src/staging/geometry.js`), jamais une variable d'environnement. L'interface génère son champ depuis les bornes, il n'y a rien à écrire côté renderer |
 | Une capacité pour le renderer | la méthode dans `apps/desktop/src/engine/index.js`, puis son nom dans `ENGINE_METHODS` du preload |
 | Une texture au viewport | rien à écrire : l'atlas se construit depuis le pack (`viewport/atlas.js`). L'ordre des faces s'y MESURE contre le mailleur, il ne se recopie pas |
+| Une FORME de bloc au viewport | rien à écrire non plus : `planModele` (`worldedit/resourcePack.js`) lit les cuboïdes du pack, `viewport/models.js` en fait des quads. Un bloc non-cube doit être NON opaque, sinon il efface les faces de ses voisins |
 | Un réglage de pinceau | `BRUSH_SHAPES` / `BRUSH_MODES` (`apps/desktop/src/renderer/viewport/brush.js`) — pur, testé sans navigateur |
 | Un écran d'outil (pas une opération) | un composant dans `apps/desktop/src/renderer/shell/tools/`, son entrée dans `TOOL_PANELS` (`Inspector.jsx`), et son bouton principal envoyé dans `ActionSlot` par un portail |
 | Une conversion pixels → grille | `apps/desktop/src/renderer/grid/pixels.js` (pur, testé sans navigateur) ; ce qui touche un canvas va dans `draw.js` |
@@ -441,6 +442,15 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   glisser (les zones de dépôt des emplacements vides) doit se retirer sur
   `dragend` : un geste annulé par Échap ou lâché dans le vide ne produit aucun
   `drop`, et les bandes restaient à l'écran.
+- **Un bloc non-cube laissé OPAQUE efface ses voisins.** Un escalier, une dalle,
+  une chaise ne bouchent pas leur case : marqués opaques, ils supprimaient les
+  faces des blocs d'à côté — l'escalier creusait un trou dans le mur qu'il
+  touche. En sens inverse, leurs PROPRES faces restent masquables, mais
+  seulement celles qui sont à ras du bord du bloc.
+- **`uv` absent n'est pas `[0,0,0,0]`.** Un modèle qui ne déclare pas les uv
+  d'une face demande qu'on les DÉDUISE des bornes du cuboïde : c'est ce qui fait
+  qu'une dalle montre la moitié basse de sa texture au lieu de la texture
+  entière écrasée. Confondre les deux étire un point de texture sur la face.
 - **Le verrou `session.lock` n'est détectable que sur Windows.** Ailleurs il est
   consultatif et une ouverture réussie ne prouve rien. `probeWorldLock` renvoie
   `{ locked, reliable }` : ne jamais réduire ça à un booléen, ce serait

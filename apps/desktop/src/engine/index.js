@@ -16,7 +16,7 @@ import { CATALOG, GROUPS, normalizeExtras } from '@titi/we-engine/blocks';
 import { renderTextSvg } from '@titi/we-engine/worldedit';
 import { flatBlockColors } from '@titi/we-engine/colors';
 import { safeFileNameExt } from '@titi/we-engine/filename';
-import { planIcone, planFaces, pickLatestVersion, orderPacks, pileComplete } from '@titi/we-engine/worldedit';
+import { planIcone, planModele, pickLatestVersion, orderPacks, pileComplete } from '@titi/we-engine/worldedit';
 import { zipIndex, zipRead } from '@titi/we-engine/worldedit';
 import { PANEL_PRESETS } from '@titi/we-engine/staging';
 
@@ -757,14 +757,14 @@ const methods = {
   },
 
   /**
-   * Textures des SIX faces d'un lot de blocs, pour l'atlas du viewport.
+   * La GÉOMÉTRIE d'un lot de blocs, pour le viewport : la forme et les textures.
    *
-   * Distinct de `blockIcons` : l'icône n'a besoin que des trois faces visibles
-   * et de la géométrie du modèle ; le viewport voit toutes les faces et ne
-   * rend que des cubes. Une même méthode rendrait trop à l'un et pas assez à
-   * l'autre.
+   * Distinct de `blockIcons` : l'icône n'a besoin que des trois faces visibles,
+   * le viewport les voit toutes — on tourne autour d'un build. Et surtout, le
+   * viewport a besoin de savoir qu'un escalier n'est PAS un cube : le dessiner
+   * en cube plein fait passer une volée de marches pour un mur.
    */
-  blockFaces: ({ ids }) => {
+  blockShapes: ({ ids }) => {
     const chemins = cheminsPack();
     if (!chemins.length) return {};
     let pack;
@@ -784,15 +784,20 @@ const methods = {
     };
 
     for (const id of (Array.isArray(ids) ? ids : []).slice(0, 2048)) {
-      let faces;
-      try { faces = planFaces(pack, id); } catch { faces = null; }
-      if (!faces) continue;
-      const sorties = {};
-      for (const [face, fichier] of Object.entries(faces)) {
-        const url = lire(fichier);
-        if (url) sorties[face] = url;
+      let modele;
+      try { modele = planModele(pack, id); } catch { modele = null; }
+      if (!modele) continue;
+
+      const boxes = [];
+      for (const box of modele.boxes) {
+        const faces = {};
+        for (const [face, decl] of Object.entries(box.faces)) {
+          const url = lire(decl.texture);
+          if (url) faces[face] = { texture: url, uv: decl.uv, rotation: decl.rotation };
+        }
+        if (Object.keys(faces).length) boxes.push({ from: box.from, to: box.to, faces });
       }
-      if (Object.keys(sorties).length) out[id] = sorties;
+      if (boxes.length) out[id] = { kind: modele.kind, boxes };
     }
     return out;
   },

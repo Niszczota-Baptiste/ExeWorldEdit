@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { voxelFromHit, brushPositions, lineBetween, Stroke } from './brush.js';
 import { buildAtlas, makeAtlasMaterial } from './atlas.js';
+import { facesDesCubes, tableDesFormes, sourcesDesModeles } from './models.js';
 import * as THREE from 'three';
 import { sparseToChunks, paddedChunk, createMeshPool, CH } from './voxels.js';
 import { buildTables } from './blockColors.js';
@@ -210,15 +211,27 @@ export default function Viewport({ geometry, layerY, onStats, onHover, brush, on
       // voudrait dire reconstruire tous les attributs — autant les mailler une
       // fois, bien.
       //
-      // Sans pack, `blockFaces` rend un objet vide : tout tombe sur la couche 0,
-      // qui est blanche, et le build s'affiche exactement comme avant.
+      // Sans pack, `blockShapes` rend un objet vide : tout tombe sur la couche
+      // 0, qui est blanche, et le build s'affiche exactement comme avant.
+      //
+      // Le MÊME appel sert aux deux : les cubes vont à l'atlas, les autres
+      // (escaliers, dalles, chaises) à la table de formes. Une seule source,
+      // donc un bloc ne peut pas être un cube pour l'atlas et un modèle pour le
+      // mailleur.
       let atlas = null;
+      let shapes = null;
       try {
-        const faces = await window.titi.engine.blockFaces({ ids: geometry.palette.map((b) => b.name) });
-        if (Object.keys(faces).length) {
-          atlas = await buildAtlas(geometry.palette, faces);
+        const formes = await window.titi.engine.blockShapes({ ids: geometry.palette.map((b) => b.name) });
+        if (Object.keys(formes).length) {
+          atlas = await buildAtlas(geometry.palette, facesDesCubes(formes), sourcesDesModeles(formes));
+          const table = tableDesFormes(geometry.palette, formes, atlas.coucheDe);
+          shapes = table.shapes;
+          // Un bloc-modèle ne CACHE pas ce qu'il y a derrière lui. Laissé
+          // opaque, il supprimait les faces de ses voisins : un escalier
+          // creusait un trou dans le mur qu'il touche.
+          for (const id of table.transparents) opaque[id] = 0;
         }
-      } catch { atlas = null; }
+      } catch { atlas = null; shapes = null; }
       if (cancelled) return;
 
       // L'ancien matériau est remplacé, pas gardé : deux matériaux vivants
@@ -245,6 +258,7 @@ export default function Viewport({ geometry, layerY, onStats, onHover, brush, on
             opaque: opaque.buffer.slice(0),
             colors: colors.buffer.slice(0),
             layers: atlas ? atlas.layers.buffer.slice(0) : null,
+            shapes,
           },
           [ids.buffer],
         );

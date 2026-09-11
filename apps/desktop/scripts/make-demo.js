@@ -183,6 +183,58 @@ staging.seedRegions(worldId, readRegions(info, [{ regionX: 0, regionZ: 0 }, { re
   await staging.regenPreview(adapter.getProject(worldId));
 }
 
+// ── Un troisième projet : la VITRINE DES FORMES ─────────────────────────────
+//
+// Un build minuscule, dont le seul but est de montrer que le viewport rend les
+// blocs qui ne sont pas des cubes. Dalles, chaises et quarts de bloc y sont
+// posés à côté de cubes pleins de la même matière : si une forme se perd, la
+// comparaison le dit tout de suite. Les modèles viennent du pack de
+// démonstration (`npm run pack`), donc aucune texture du jeu n'est requise.
+
+const vitrineId = 'demo-formes';
+adapter.removeProject(vitrineId);
+{
+  const W = 24, D = 16, Y0 = 64;
+  adapter.saveProject({
+    id: vitrineId,
+    name: 'Vitrine des formes',
+    min: { x: 0, y: Y0, z: 0 }, size: { x: W, y: 8, z: D },
+  });
+  // Les blocs sont posés AVANT le semis, sur des régions vierges : c'est le
+  // chemin de `buildPlaneFromNames`, et il évite d'ouvrir une porte d'écriture
+  // publique sur le staging pour un script de démonstration.
+  const regions = blankRegions({ origin: { x: 0, y: Y0, z: 0 }, size: { x: W, y: 8, z: D } });
+  const store = new RegionStore(regions);
+  const lim = { min: { x: 0, y: Y0, z: 0 }, max: { x: W - 1, y: Y0 + 7, z: D - 1 } };
+  await store.warmup(lim);
+
+  const poser = (x, y, z, nom) => store.setBlock(x, y, z, { Name: nom, Properties: null });
+
+  // Un sol, pour que les formes posées dessus aient un appui visible.
+  for (let x = 0; x < W; x++) for (let z = 0; z < D; z++) poser(x, Y0, z, 'minecraft:stone_bricks');
+
+  // Quatre rangées : la même matière en cube plein, puis en dalle, en quart de
+  // bloc, et enfin les chaises. Un escalier de dalles monte en marches — c'est
+  // le cas qui ressortait en mur plein avant cette passe.
+  for (let x = 2; x < W - 2; x++) {
+    poser(x, Y0 + 1, 2, 'minecraft:stone_bricks');
+    poser(x, Y0 + 1, 5, 'minecraft:stone_slab');
+    poser(x, Y0 + 1, 8, 'minefield:quart_de_bloc');
+    if (x % 3 === 2) poser(x, Y0 + 1, 12, 'minefield:chaise');
+  }
+  for (let m = 0; m < 5; m++) {
+    for (let z = 3; z <= 4; z++) poser(4 + m * 3, Y0 + 1 + m, z, 'minecraft:stone_slab');
+  }
+
+  staging.seedRegions(vitrineId, [...store.commit({ touchedOnly: false })].map(([key, buffer]) => {
+    const [rx, rz] = key.split(',').map(Number);
+    return { regionX: rx, regionZ: rz, buffer };
+  }));
+  await staging.rescanExtent(adapter.getProject(vitrineId));
+  const pv = staging.readPreview(vitrineId);
+  console.log(`\nVitrine des formes : ${pv.count.toLocaleString('fr-FR')} blocs, ${pv.palette.length} entrées de palette`);
+}
+
 // La vallée redevient le projet le plus récent, donc celui qui s'ouvre : c'est
 // elle qui montre quelque chose. La save reste dans le second onglet.
 adapter.saveProject(adapter.getProject(id));

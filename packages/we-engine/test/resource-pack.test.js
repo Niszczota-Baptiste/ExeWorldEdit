@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  modeleDuBloc, aplatitModele, resoutTexture, estCubePlein, planIcone, planFaces,
+  modeleDuBloc, aplatitModele, resoutTexture, estCubePlein, planIcone, planFaces, planModele,
   FACES_VUES, FACES_CUBE,
 } from '../src/worldedit/resourcePack.js';
 
@@ -182,4 +182,87 @@ test('une face sans texture propre prend celle du bloc', () => {
 
 test('un bloc absent du pack n’a pas de faces', () => {
   assert.equal(planFaces(pack(VANILLA), 'minefield:rien'), null);
+});
+
+// ── La géométrie complète, pour le viewport ─────────────────────────────────
+//
+// `planFaces` rend six textures et suppose un cube ; `planModele` rend la
+// FORME. C'est la différence entre une volée d'escaliers qui monte et un mur.
+
+const ESCALIER = {
+  'assets/minecraft/blockstates/oak_stairs.json': { variants: { 'facing=east,half=bottom,shape=straight': { model: 'minecraft:block/oak_stairs' } } },
+  'assets/minecraft/models/block/oak_stairs.json': {
+    textures: { bottom: 'minecraft:block/oak_planks', top: 'minecraft:block/oak_planks', side: 'minecraft:block/oak_planks' },
+    elements: [
+      { from: [0, 0, 0], to: [16, 8, 16], faces: { down: { texture: '#bottom', uv: [0, 0, 16, 16] }, up: { texture: '#top' }, north: { texture: '#side' }, south: { texture: '#side' }, west: { texture: '#side' }, east: { texture: '#side' } } },
+      { from: [8, 8, 0], to: [16, 16, 16], faces: { up: { texture: '#top' }, west: { texture: '#side', uv: [0, 0, 16, 8] }, east: { texture: '#side' }, north: { texture: '#side' }, south: { texture: '#side' } } },
+    ],
+  },
+};
+
+test('un escalier rend DEUX cuboïdes, pas un cube', () => {
+  const m = planModele(pack(ESCALIER), 'minecraft:oak_stairs');
+  assert.equal(m.kind, 'model');
+  assert.equal(m.boxes.length, 2);
+  assert.deepEqual(m.boxes[0].from, [0, 0, 0]);
+  assert.deepEqual(m.boxes[0].to, [16, 8, 16], 'la marche basse fait la moitié de la hauteur');
+  assert.deepEqual(m.boxes[1].from, [8, 8, 0]);
+});
+
+test('une face NON déclarée par un cuboïde n’est pas inventée', () => {
+  // C'est ainsi qu'un modèle cache une face intérieure. La combler ferait
+  // apparaître une paroi au milieu de l'escalier — invisible de l'extérieur,
+  // mais payée en triangles sur tout un build.
+  const m = planModele(pack(ESCALIER), 'minecraft:oak_stairs');
+  assert.equal('down' in m.boxes[1].faces, false, 'le dessous de la marche haute est contre la basse');
+  assert.equal(Object.keys(m.boxes[0].faces).length, 6);
+});
+
+test('les uv déclarés sont conservés, et l’absence se distingue de zéro', () => {
+  // `uv` absent veut dire « déduis-le des bornes du cuboïde », pas « 0,0,0,0 ».
+  // Confondre les deux fait afficher un point de texture étiré sur la face.
+  const m = planModele(pack(ESCALIER), 'minecraft:oak_stairs');
+  assert.deepEqual(m.boxes[0].faces.down.uv, [0, 0, 16, 16]);
+  assert.equal(m.boxes[0].faces.up.uv, null);
+  assert.deepEqual(m.boxes[1].faces.west.uv, [0, 0, 16, 8]);
+});
+
+test('un cube plein est classé cube, avec ses six faces texturées', () => {
+  const m = planModele(pack(VANILLA), 'minecraft:grass_block');
+  assert.equal(m.kind, 'cube');
+  assert.equal(m.boxes.length, 1);
+  assert.deepEqual(Object.keys(m.boxes[0].faces).sort(), FACES_CUBE.slice().sort());
+  assert.equal(m.boxes[0].faces.up.texture, 'assets/minecraft/textures/block/grass_block_top.png');
+  assert.equal(m.boxes[0].faces.down.texture, 'assets/minecraft/textures/block/dirt.png');
+});
+
+test('un modèle sans elements est un cube plein, pas un modèle vide', () => {
+  const p = pack({
+    'assets/minefield/blockstates/brique.json': { variants: { '': { model: 'minefield:block/brique' } } },
+    'assets/minefield/models/block/brique.json': { textures: { all: 'minefield:block/brique' } },
+  });
+  const m = planModele(p, 'minefield:brique');
+  assert.equal(m.kind, 'cube');
+  assert.equal(m.boxes.length, 1);
+  for (const f of FACES_CUBE) assert.equal(m.boxes[0].faces[f].texture, 'assets/minefield/textures/block/brique.png');
+});
+
+test('un cuboïde qui DÉBORDE du bloc est rendu tel quel', () => {
+  // Minecraft autorise −16 à 32, et le dossier d'une chaise monte à 20. Serrer
+  // sur 0..16 raboterait le dossier sans rien signaler.
+  const p = pack({
+    'assets/minefield/blockstates/chaise.json': { variants: { '': { model: 'minefield:block/chaise' } } },
+    'assets/minefield/models/block/chaise.json': {
+      textures: { bois: 'minefield:block/chene' },
+      elements: [{ from: [2, 8, 12], to: [14, 20, 14], faces: { up: { texture: '#bois' } } }],
+    },
+  });
+  const m = planModele(p, 'minefield:chaise');
+  assert.equal(m.kind, 'model');
+  assert.deepEqual(m.boxes[0].to, [14, 20, 14]);
+  assert.equal(m.boxes[0].faces.up.texture, 'assets/minefield/textures/block/chene.png');
+});
+
+test('un bloc absent du pack n’a pas de géométrie', () => {
+  assert.equal(planModele(pack(VANILLA), 'minefield:rien'), null);
 });

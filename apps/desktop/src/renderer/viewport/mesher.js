@@ -9,9 +9,11 @@
 // supprimer les faces cachées par le chunk d'à côté, et à calculer une
 // occlusion ambiante correcte jusqu'au bord.
 //
-// Ce mailleur ne traite que les CUBES PLEINS. Escaliers, dalles et quarts de
-// bloc `minefield:*` demandent leur géométrie de modèle, ajoutée au même tampon
-// dans une passe séparée (phase 2.5) : ils sont pour l'instant rendus en cube.
+// La passe gloutonne ne traite que les CUBES PLEINS — elle travaille sur une
+// grille d'identifiants, et un identifiant n'a pas de forme. Escaliers, dalles
+// et chaises `minefield:*` passent par une SECONDE passe, qui pose les quads
+// préparés par `models.js` sur chaque voxel concerné. Les deux remplissent le
+// même tampon : un seul maillage, un seul appel de dessin par chunk.
 
 export const P = 18;           // côté du bloc paddé
 const PAD = 1;
@@ -45,8 +47,11 @@ function cornerAO(side1, side2, corner) {
  *   Absente, tout va sur la couche 0 — qui est BLANCHE, donc le produit avec la
  *   couleur de sommet redonne exactement le rendu sans textures. Pas de
  *   branchement dans le nuanceur, pas de second matériau.
+ * @param {(object|null)[]} [shapes] table `id` → quads d'un bloc non-cube
+ *   (`models.js`), ou `null`. Ces blocs doivent être NON opaques dans `opaque`,
+ *   sinon la passe gloutonne leur dessine un cube par-dessus.
  */
-export function meshChunk(ids, opaque, colors, layers) {
+export function meshChunk(ids, opaque, colors, layers, shapes) {
   const positions = [];
   const shades = [];
   const rgb = [];
@@ -156,6 +161,10 @@ export function meshChunk(ids, opaque, colors, layers) {
     }
   }
 
+  if (shapes) {
+    emitModels({ positions, rgb, uv, lay, indices, colors, shapes, at, solid });
+  }
+
   return {
     positions: new Float32Array(positions),
     colors: new Uint8Array(rgb),
@@ -212,4 +221,68 @@ function emitQuad({ positions, rgb, uv, lay, indices, colors, layers, d, u, v, i
   // L'ordre d'enroulement dépend du sens de la normale.
   if (front) indices.push(...tri);
   else indices.push(tri[2], tri[1], tri[0], tri[5], tri[4], tri[3]);
+}
+
+/** Décalage du voisin de chaque face, dans l'ordre −X +X −Y +Y −Z +Z. */
+const VOISIN = [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]];
+
+/**
+ * Seconde passe : les blocs qui ne sont pas des cubes.
+ *
+ * Leurs quads sont déjà calculés une fois pour toute la palette (`models.js`) ;
+ * ici on ne fait que les translater sur chaque voxel et jeter ceux qu'un voisin
+ * cache. Le calcul par voxel serait le même travail répété des milliers de fois
+ * pour un résultat identique.
+ *
+ * Pas d'occlusion ambiante sur ces quads. L'AO du mailleur s'échantillonne dans
+ * le PLAN d'une face de cube ; une face de modèle est n'importe où dans le
+ * bloc, et l'y appliquer donnerait des dégradés faux — mieux vaut pas d'ombre
+ * du tout qu'une ombre au mauvais endroit.
+ */
+function emitModels({ positions, rgb, uv, lay, indices, colors, shapes, at, solid }) {
+  for (let y = 0; y < CH; y++) {
+    for (let z = 0; z < CH; z++) {
+      for (let x = 0; x < CH; x++) {
+        const id = at(x, y, z);
+        const forme = id && shapes[id];
+        if (!forme) continue;
+
+        for (let q = 0; q < forme.count; q++) {
+          const cache = forme.cull[q];
+          if (cache !== 255) {
+            const [dx, dy, dz] = VOISIN[cache];
+            if (solid(x + dx, y + dy, z + dz)) continue;
+          }
+
+          const start = positions.length / 3;
+          for (let c = 0; c < 4; c++) {
+            positions.push(
+              x + forme.pos[q * 12 + c * 3],
+              y + forme.pos[q * 12 + c * 3 + 1],
+              z + forme.pos[q * 12 + c * 3 + 2],
+            );
+            uv.push(forme.uv[q * 8 + c * 2], forme.uv[q * 8 + c * 2 + 1]);
+          }
+
+          const couche = forme.layer[q];
+          for (let c = 0; c < 4; c++) lay.push(couche);
+
+          // Même règle que pour un cube : une face texturée ne porte que
+          // l'ombrage, sinon la teinte du bloc s'applique deux fois.
+          const k = FACE_SHADE[forme.face[q]];
+          const texture = couche !== 0;
+          const r = texture ? 255 : colors[id * 3];
+          const g = texture ? 255 : colors[id * 3 + 1];
+          const b = texture ? 255 : colors[id * 3 + 2];
+          for (let c = 0; c < 4; c++) {
+            rgb.push(Math.min(255, r * k) | 0, Math.min(255, g * k) | 0, Math.min(255, b * k) | 0);
+          }
+
+          const [a0, a1, a2, a3] = [start, start + 1, start + 2, start + 3];
+          if (forme.flip[q]) indices.push(a2, a1, a0, a3, a2, a0);
+          else indices.push(a0, a1, a2, a0, a2, a3);
+        }
+      }
+    }
+  }
 }

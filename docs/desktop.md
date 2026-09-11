@@ -1647,6 +1647,97 @@ plus claire.
 
 ---
 
+## Les blocs qui ne sont pas des cubes
+
+Le mailleur greedy travaille sur une grille d'identifiants, et un identifiant
+n'a pas de forme. Escaliers, dalles, quarts de bloc et chaises `minefield:*`
+passaient donc en **cube plein** : une volée de marches s'affichait comme un
+mur, et c'est précisément la géométrie qu'on voulait vérifier à l'œil. Les
+icônes de la palette, elles, avaient déjà leur forme depuis la passe des
+icônes — le viewport était le dernier endroit à mentir.
+
+### Une seconde passe, dans le même tampon
+
+La passe gloutonne reste inchangée : elle est excellente pour ce qu'elle fait,
+et l'immense majorité des blocs d'un build sont des cubes pleins. Les autres
+passent par une **seconde passe** qui pose sur chaque voxel des quads préparés
+une fois pour toute la palette (`viewport/models.js`). Les deux passes
+remplissent le même tampon : un seul maillage, un seul appel de dessin par
+chunk. Un second matériau aurait doublé les appels de dessin pour quelques
+chaises.
+
+Calculer la géométrie par voxel serait le même travail répété des milliers de
+fois pour un résultat identique — d'où la table, construite au moment où
+l'atlas l'est.
+
+### Un bloc-modèle n'est pas opaque
+
+C'est la correction qui ne se devine pas. Laissé opaque, un escalier supprimait
+les faces de ses voisins : il creusait un trou dans le mur qu'il touche, et le
+build se voyait au travers. Il ne participe pas non plus à l'occlusion
+ambiante, pour la même raison — il ne bouche rien.
+
+En sens inverse, ses propres faces doivent quand même pouvoir être cachées :
+le dessous d'une dalle posée sur un bloc plein ne se voit jamais. Une face
+n'est masquable que si elle est **à ras du bord du bloc** ; l'assise d'une
+chaise flotte au milieu, rien ne la cache. Un test compare le nombre de quads
+du modèle avec et sans voisin plein : exactement un de moins.
+
+### L'ordre d'enroulement se MESURE
+
+Recopier à la main l'ordre des sommets des six faces, c'est six occasions de se
+tromper — et une face à l'envers reste invisible tant qu'on ne tourne pas
+autour du bloc. `models.js` calcule donc `du × dv` et le compare à la normale
+attendue de la face ; si le produit est négatif, le triangle est inversé.
+
+Le test correspondant maille un vrai bloc-modèle isolé, calcule la normale
+géométrique de chacun de ses **douze triangles**, et exige qu'elle pointe à
+l'opposé du centre du bloc. Vérifié en échec : forcer « toujours à l'endroit »
+le fait tomber.
+
+C'est la même leçon que `FACE_SHADE` quelques semaines plus tôt — un ordre
+d'indices se mesure contre le code qui le produit, il ne se lit pas dans un
+commentaire.
+
+### Les uv déduits ne sont pas cosmétiques
+
+Quand un modèle ne déclare pas les `uv` d'une face, le jeu les **déduit des
+bornes du cuboïde**. C'est ce qui fait qu'une dalle montre la moitié basse de
+sa texture sur ses côtés, et non la texture entière écrasée sur quatre pixels
+de haut. Le `v` de Minecraft descend depuis le haut, d'où les `16 −` sur les
+faces verticales.
+
+Piège attenant : `uv` **absent** veut dire « déduis-le », pas `[0,0,0,0]`.
+Confondre les deux afficherait un point de texture étiré sur toute la face. Le
+moteur rend donc `null` et non un tableau de zéros, et un test l'exige.
+
+### Une seule source pour la forme et pour l'atlas
+
+`blockFaces` (six textures, cube supposé) a été **remplacé** par `blockShapes`,
+qui rend la forme complète. Le même appel sert aux deux usages : les cubes vont
+à l'atlas, les autres à la table de formes. Un bloc ne peut donc pas être un
+cube pour l'atlas et un modèle pour le mailleur — c'est exactement le genre de
+divergence que deux appels séparés auraient fini par produire.
+
+Les textures des faces de modèle sont chargées dans le **même** atlas, par une
+liste d'extras passée à `buildAtlas` : sans elles, les escaliers seraient
+sortis en blanc.
+
+### Vérifié à l'œil, sur un build fait pour ça
+
+`npm run demo` fabrique désormais un troisième projet, **Vitrine des formes** :
+un sol de briques, une rangée de cubes pleins, une de dalles, une de quarts de
+bloc, sept chaises, et un escalier de dalles qui monte en marches. Les modèles
+viennent du pack de démonstration (`npm run pack`), donc aucune texture du jeu
+n'est requise pour le voir.
+
+La capture montre les pieds et le dossier des chaises, la demi-hauteur des
+dalles, et les marches de l'escalier. Le gros build de la vallée (828 887
+blocs, 354 chunks) rend exactement comme avant : sans bloc non-cube, la table
+de formes vaut `null` et la seconde passe est sautée entière.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed

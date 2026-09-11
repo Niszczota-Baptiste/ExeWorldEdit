@@ -219,3 +219,68 @@ export function planIcone(pack, id) {
 
   return { kind: estCubePlein(geo) ? 'cube' : 'model', elements: geo, textures: utiles };
 }
+
+/**
+ * La GÉOMÉTRIE complète d'un bloc, pour le rendu du build : ses cuboïdes, et
+ * la texture de chacune de leurs faces.
+ *
+ * Distinct de `planFaces`, qui rend six textures et suppose un cube. Un
+ * escalier, une dalle, une chaise `minefield:*` ont une forme ; les dessiner en
+ * cube plein donne un build qui ment — une volée d'escaliers apparaît comme un
+ * mur, et c'est justement la géométrie qu'on voulait vérifier à l'œil.
+ *
+ * Ce que le moteur ne fait PAS ici : décider comment dessiner. Il rend des
+ * cuboïdes en unités de modèle (0..16, et Minecraft autorise −16 à 32), à
+ * charge de l'appelant d'en faire des sommets. Le moteur n'a pas de canvas.
+ *
+ * @returns {{ kind:'cube'|'model', boxes:{from:number[], to:number[], faces:Record<string,{texture:string, uv:number[]|null, rotation:number}>}[] }|null}
+ */
+export function planModele(pack, id) {
+  const ref = modeleDuBloc(pack, id);
+  if (!ref) return null;
+  const { textures, elements } = aplatitModele(pack, ref);
+
+  // Un modèle sans `elements` hérite de la forme d'un cube : `cube_all` et ses
+  // enfants ne déclarent que des textures.
+  const geo = elements && elements.length
+    ? elements
+    : [{ from: [0, 0, 0], to: [16, 16, 16], faces: Object.fromEntries(FACES_CUBE.map((f) => [f, { texture: '#all' }])) }];
+
+  // Repli, dans l'ordre où les modèles du jeu déclarent leurs textures. Un
+  // cuboïde dont une face ne cite aucune texture prend celle-là plutôt que rien
+  // — un trou dans un escalier se verrait davantage qu'une face approchée.
+  let defaut = null;
+  for (const cle of ['all', 'texture', 'side', 'end', 'top', 'particle']) {
+    defaut = resoutTexture(textures, cle);
+    if (defaut) break;
+  }
+
+  const boxes = [];
+  for (const e of geo) {
+    if (!Array.isArray(e.from) || !Array.isArray(e.to)) continue;
+    const faces = {};
+    for (const f of FACES_CUBE) {
+      const decl = e.faces?.[f];
+      // Un cuboïde qui ne DÉCLARE pas une face n'en a pas : c'est ainsi qu'un
+      // modèle cache l'intérieur d'une porte ou le dessous d'une trappe. On ne
+      // comble QUE si le cuboïde ne déclare aucune face du tout.
+      if (!decl && e.faces) continue;
+      const ref2 = decl?.texture;
+      const cle = typeof ref2 === 'string' && ref2.startsWith('#') ? ref2.slice(1) : null;
+      const chemin = cle ? resoutTexture(textures, cle) : (typeof ref2 === 'string' ? ref2 : null);
+      const fin = chemin || resoutTexture(textures, f) || defaut;
+      if (!fin) continue;
+      faces[f] = {
+        texture: cheminTexture(fin),
+        // `uv` est en pixels de texture (0..16). Absent, le jeu le DÉDUIT des
+        // bornes du cuboïde — c'est ce qui fait qu'une dalle montre la moitié
+        // basse de sa texture et non la texture entière écrasée.
+        uv: Array.isArray(decl?.uv) && decl.uv.length === 4 ? decl.uv.map(Number) : null,
+        rotation: Number(decl?.rotation) || 0,
+      };
+    }
+    if (Object.keys(faces).length) boxes.push({ from: e.from.map(Number), to: e.to.map(Number), faces });
+  }
+  if (!boxes.length) return null;
+  return { kind: estCubePlein(geo) ? 'cube' : 'model', boxes };
+}
