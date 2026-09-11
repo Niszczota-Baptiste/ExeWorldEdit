@@ -13,7 +13,7 @@ export const TOOLS = [
   { id: 'blocks', label: 'Blocs', icon: 'Blocks', key: 'B' },
   { id: 'shapes', label: 'Formes', icon: 'Circle', key: 'F' },
   { id: 'terrain', label: 'Terrain', icon: 'Mountain', key: 'G' },
-  { id: 'brush', label: 'Pinceau', icon: 'Brush', key: 'P', soon: true },
+  { id: 'brush', label: 'Pinceau', icon: 'Brush', key: 'P' },
   { id: 'path', label: 'Tracé', icon: 'Spline', key: 'C' },
   { id: 'panel', label: 'Texte et carte', icon: 'Type', key: 'X' },
   { id: 'heightmap', label: 'Relief', icon: 'Waves', key: 'H' },
@@ -49,7 +49,7 @@ export const TOOL_OPS = {
  * encore — jamais présenter les commandes d'un autre.
  */
 export const TOOL_NOTES = {
-  brush: { soon: true, text: 'Peindre directement dans la vue, sans passer par une sélection. Phase 3.' },
+  brush: { text: 'Peindre directement dans la vue, sans passer par une sélection.' },
   panel: { text: 'Écrire un texte ou projeter une image en blocs sur un mur plat.' },
   heightmap: { text: 'Sculpter le relief depuis une image en niveaux de gris, et ressortir celui d’une zone.' },
   measure: { text: 'Les dimensions de la sélection sont au-dessus : taille en blocs et volume. Rien à appliquer.' },

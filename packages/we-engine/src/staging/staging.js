@@ -15,7 +15,7 @@ import {
   opMirror, opMirrorCopy, opRotate, opTranslate, opReplace, opSet, opCopy, opPaste, opCut,
   opWalls, opFaces, opHollow, opOverlay, opNaturalize, opStack, opSphere, opCyl, opSmooth, opScale, opMix,
   opLine, opPyramid, opCone, opErode, opDilate, opDrain, opBiome, opPath, opTerrain,
-  MaskedVolume, sameBlock, hash3,
+  MaskedVolume, sameBlock, hash3, matchesAt,
 } from '../worldedit/transform.js';
 import { normalizeParams } from '../worldedit/operations.js';
 import {
@@ -632,6 +632,81 @@ export function createStaging(adapter, options = {}) {
   }
 
   /**
+   * Un TRAIT de pinceau : des cases éparses, toutes du même bloc.
+   *
+   * Le renderer envoie des positions et non une sélection, parce qu'un trait
+   * n'a pas de forme rectangulaire — c'est une suite de brosses le long d'un
+   * déplacement de souris. Il n'envoie PAS les anciennes valeurs : le moteur
+   * est la source de vérité, et un renderer désynchronisé ferait réécrire à
+   * l'annulation des blocs qui n'ont jamais existé.
+   *
+   * Un trait entier = une seule entrée d'annulation. Un instantané par
+   * déplacement de souris remplirait la pile en trois secondes.
+   *
+   * @param {Int32Array|number[]} o.positions plat `[x, y, z, …]`
+   * @param {{name, states?}|null} o.block `null` efface (air)
+   */
+  async function applyStroke({ project, positions, block, actor, onProgress }) {
+    const startedAt = Date.now();
+    const pos = positions || [];
+    if (!pos.length || pos.length % 3 !== 0) throw new Error('bad_stroke');
+    if (pos.length / 3 > limits.wandMax) throw new Error('selection_too_large');
+
+    // Les positions sont VALIDÉES contre les limites d'édition, pas seulement
+    // bornées : un trait qui déborde doit être refusé comme le serait une
+    // sélection, pas écrire silencieusement à côté.
+    const lim = editLimits(project);
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity;
+    let x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < pos.length; i += 3) {
+      const x = pos[i], y = pos[i + 1], z = pos[i + 2];
+      if (x < lim.min.x || x > lim.max.x || y < lim.min.y || y > lim.max.y || z < lim.min.z || z > lim.max.z) {
+        throw new Error('out_of_bounds');
+      }
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+      if (z < z0) z0 = z; if (z > z1) z1 = z;
+    }
+    const bbox = { min: { x: x0, y: y0, z: z0 }, max: { x: x1, y: y1, z: z1 } };
+
+    onProgress?.('load', 5);
+    const store = loadStore(project);
+    await store.warmup(bbox);
+    onProgress?.('apply', 30); await tick();
+
+    // `null` = air : c'est ainsi que le pinceau efface, et `setBlock` sait
+    // déjà retirer un bloc quand on lui donne de l'air.
+    const cible = block?.name
+      ? { Name: block.name, Properties: block.states || null }
+      : { Name: 'minecraft:air', Properties: null };
+
+    let changed = 0;
+    for (let i = 0; i < pos.length; i += 3) {
+      const x = pos[i], y = pos[i + 1], z = pos[i + 2];
+      if (matchesAt(store, x, y, z, cible)) continue;
+      store.setBlock(x, y, z, { Name: cible.Name, Properties: cible.Properties });
+      changed++;
+      if ((i & 8191) === 0) await tick();
+    }
+
+    onProgress?.('commit', 60); await tick();
+    snapshotRegions(project.id, regionKeysForBBox(bbox));
+    clearRedo(project.id);
+    writeRegions(project.id, store.commit({ touchedOnly: true }));
+
+    onProgress?.('preview', 85); await tick();
+    const sparse = await growAndPreview(project, store, bbox, bbox);
+
+    const durationMs = Date.now() - startedAt;
+    adapter.appendAudit({
+      projectId: project.id, actor, operation: 'brush',
+      params: { bbox, cases: pos.length / 3, block: cible.Name },
+      blocksChanged: changed, durationMs,
+    });
+    return { blocksChanged: changed, bounds: bbox, durationMs, previewTruncated: !!sparse.truncated };
+  }
+
+  /**
    * Génère du relief : `heights` (valeurs 0..1, indexées z*sizeX + x) donne la
    * hauteur de chaque colonne XZ dans la sélection, la hauteur max étant la
    * plage Y de la sélection. `solid` remplit la colonne (sous-couche `under` +
@@ -926,6 +1001,7 @@ export function createStaging(adapter, options = {}) {
     applyMapBlocks,
     applyPanel,
     applyHeightmap,
+    applyStroke,
     exportHeightmap,
     floodSelect,
     // historique

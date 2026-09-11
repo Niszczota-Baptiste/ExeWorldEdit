@@ -380,6 +380,33 @@ export const useApp = create((set, get) => ({
   },
 
   applyPanel: (params) => get().runGrid('panneau', ({ id, selection }) => api().engine.applyPanel({ id, selection, ...params })),
+  /**
+   * Un trait de pinceau. Il ne dépend pas de la sélection — c'est tout l'intérêt
+   * du pinceau —, donc il ne passe pas par `runGrid`, qui en exige une.
+   */
+  async applyStroke(positions) {
+    const id = get().activeId;
+    if (!id || !positions?.length) return null;
+    set({ busy: { operation: 'pinceau', phase: 'load', pct: 0 } });
+    try {
+      const res = await api().engine.applyStroke({
+        id, positions, block: get().brush.mode === 'erase' ? null : { name: get().block },
+      });
+      await get().refreshProjects();
+      set({ geometry: await api().engine.getGeometry({ id }) });
+      if (res.blocksChanged) get().say(`Pinceau — ${res.blocksChanged.toLocaleString('fr-FR')} blocs en ${res.durationMs} ms.`);
+      return res;
+    } catch (e) {
+      get().say(errorText(e, 'pinceau'));
+      return null;
+    } finally {
+      set({ busy: null });
+    }
+  },
+
+  /** Réglages du pinceau. Ils vivent dans le store : le viewport les LIT. */
+  brush: { shape: 'sphere', radius: 2, mode: 'paint' },
+  setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
   applyMapBlocks: (names) => get().runGrid('carte', ({ id, selection }) => api().engine.applyMapBlocks({ id, selection, names })),
   applyHeightmap: (heights, params) => get().runGrid('relief', ({ id, selection }) => api().engine.applyHeightmap({ id, selection, heights, params })),
 
@@ -587,6 +614,7 @@ export const ERREURS = {
   bad_factor: 'Facteur d’échelle invalide.',
   bad_panel: 'Panneau invalide : le masque ne couvre pas toute la zone.',
   bad_name: 'Un nom vide n’est pas un nom.',
+  bad_stroke: 'Trait de pinceau invalide : aucune case à peindre.',
   biome_unsupported: 'Ce build ne porte pas de données de biome.',
   empty_box: 'La zone ne contient aucun bloc.',
   unknown_operation: 'Opération inconnue : le moteur ne la connaît pas.',

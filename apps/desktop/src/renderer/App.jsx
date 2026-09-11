@@ -34,6 +34,9 @@ export default function App() {
   const run = useApp((s) => s.run);
   const setTool = useApp((s) => s.setTool);
   const keys = useApp((s) => s.keys);
+  const tool = useApp((s) => s.tool);
+  const brush = useApp((s) => s.brush);
+  const applyStroke = useApp((s) => s.applyStroke);
   const [dropping, setDropping] = useState(false);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -122,7 +125,19 @@ export default function App() {
         <PanelGroup direction="horizontal" autoSaveId="titi-layout">
           <Panel defaultSize={76} minSize={40}>
             <div className="viewport">
-              {geometry ? <Viewport geometry={geometry} layerY={layerY} onStats={setStats} /> : <Empty onOpen={open} onOpenWorld={openWorld} />}
+              {geometry
+                ? (
+                  <Viewport
+                    geometry={geometry}
+                    layerY={layerY}
+                    onStats={setStats}
+                    // Le pinceau n'est armé que quand son outil est choisi :
+                    // sinon le clic gauche sert à tourner la caméra.
+                    brush={tool === 'brush' && project ? { ...brush, limits: project.limits } : null}
+                    onStroke={applyStroke}
+                  />
+                )
+                : <Empty onOpen={open} onOpenWorld={openWorld} />}
 
               {project && (
                 <>

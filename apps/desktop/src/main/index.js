@@ -324,7 +324,7 @@ app.whenReady().then(async () => {
     const secours = setTimeout(() => {
       console.error(`✗ capture abandonnée : rien écrit après ${delay + 30000 + Number(process.env.TITI_SCREENSHOT_CLICK_WAIT || 0)} ms`);
       app.exit(1);
-    }, delay + 30000 + Number(process.env.TITI_SCREENSHOT_CLICK_WAIT || 0));
+    }, delay + 30000 + Number(process.env.TITI_SCREENSHOT_CLICK_WAIT || 0) + Number(process.env.TITI_SCREENSHOT_PAINT_WAIT || 0));
     win.webContents.on('did-finish-load', () => {
       setTimeout(async () => {
        try {
@@ -404,6 +404,27 @@ app.whenReady().then(async () => {
             return 'ok';
           })()`);
           await new Promise((r) => setTimeout(r, 900));
+        }
+        // Un TRAIT de pinceau : « x1,y1,x2,y2 » en fractions de la fenêtre.
+        // De vrais événements souris, donc le même chemin qu'une main sur la
+        // souris — c'est le seul moyen de vérifier qu'un pinceau peint.
+        if (process.env.TITI_SCREENSHOT_PAINT) {
+          const [fx1, fy1, fx2, fy2] = process.env.TITI_SCREENSHOT_PAINT.split(',').map(Number);
+          const [w, h] = win.getContentSize();
+          const pt = (fx, fy) => ({ x: Math.round(w * fx), y: Math.round(h * fy) });
+          const a = pt(fx1, fy1), b = pt(fx2, fy2);
+          win.webContents.sendInputEvent({ type: 'mouseMove', ...a });
+          await new Promise((r) => setTimeout(r, 200));
+          win.webContents.sendInputEvent({ type: 'mouseDown', ...a, button: 'left', clickCount: 1 });
+          // Plusieurs pas : un trait est une SUITE de brosses, et c'est le
+          // recollage de ces brosses qu'on veut exercer.
+          for (let i = 1; i <= 8; i++) {
+            const p = { x: Math.round(a.x + (b.x - a.x) * (i / 8)), y: Math.round(a.y + (b.y - a.y) * (i / 8)) };
+            win.webContents.sendInputEvent({ type: 'mouseMove', ...p, button: 'left', buttons: 1 });
+            await new Promise((r) => setTimeout(r, 60));
+          }
+          win.webContents.sendInputEvent({ type: 'mouseUp', ...b, button: 'left', clickCount: 1 });
+          await new Promise((r) => setTimeout(r, Number(process.env.TITI_SCREENSHOT_PAINT_WAIT || 6000)));
         }
         // Un double-clic — le geste qui ouvre un renommage d'onglet.
         if (process.env.TITI_SCREENSHOT_DBLCLICK) {

@@ -1529,6 +1529,69 @@ réassignation annoncerait un raccourci qui ne marche pas.
 
 ---
 
+## Le pinceau
+
+Le dernier outil marqué « à venir ». Viser dans la vue, glisser, peindre — sans
+passer par une sélection.
+
+### Le partage, encore
+
+Le renderer sait où pointe le curseur ; le moteur sait ce qu'il y a dans les
+régions. Le rayon est lancé contre les **maillages** et non contre les données :
+le maillage est déjà là et à jour, et three sait l'interroger. Refaire une
+traversée de voxels à côté voudrait dire deux représentations du même build
+qui peuvent diverger — et la divergence se verrait comme un pinceau qui peint à
+côté de ce qu'on vise.
+
+Le maillage est *greedy* : une face peut couvrir cent blocs. Le picking rend donc
+le **point** et la **normale**, pas un indice de face, et le calcul de la case
+revient à un module pur.
+
+### Trois décisions, trois façons de se tromper
+
+**De quel côté de la face.** Un rayon touche un plan entre deux cases : le point
+d'impact est pile sur la frontière, et `Math.floor` y tombe d'un côté ou de
+l'autre selon l'arrondi du flottant. On s'écarte d'un demi-pas le long de la
+normale — dehors pour poser, dedans pour effacer. C'est la différence entre
+poser un bloc sur la table et remplacer la table.
+
+**Relier les brosses.** La souris n'envoie qu'une poignée de positions par
+seconde. Sans interpolation, un trait est une suite de taches :
+
+![Le pinceau](images/pinceau.png)
+
+*En haut, le premier essai : huit brosses, huit taches. En bas, après
+`lineBetween` : une trace continue de 1 942 blocs. Un pinceau qui n'interpole
+pas est un tampon.*
+
+`lineBetween` refuse aussi de relier un saut démesuré — le curseur qui quitte le
+build et y revient ailleurs tracerait sinon une barre à travers tout.
+
+**Un trait, une annulation.** Le trait est accumulé dans le renderer et envoyé
+d'un seul bloc au relâchement. Un appel au moteur par déplacement de souris
+ferait un aller-retour par pixel, et surtout une entrée d'annulation par pixel :
+la pile serait pleine en trois secondes et l'annulation inutilisable.
+
+Le renderer n'envoie **pas** les anciennes valeurs, seulement les positions et
+le bloc à poser. Le moteur est la source de vérité : un renderer désynchronisé
+ferait réécrire à l'annulation des blocs qui n'ont jamais existé.
+
+### Ce que le test a attrapé
+
+Le dédoublonnage d'un trait utilisait une clé entière composite — 21 bits par
+axe. Trois coordonnées ne tiennent pas dans les 53 bits d'un `Number` : les
+arrondis faisaient collisionner des cases distinctes, et vingt-sept cases
+sortaient à vingt-trois. Une clé texte est acceptable ici, contrairement au
+piège du recollage d'aperçu : on en fabrique une par case d'un **trait**
+(quelques dizaines de milliers, une fois), pas par bloc d'un **build**
+(plusieurs millions, à chaque opération).
+
+Un trait qui déborde des limites est **refusé**, pas rogné : écrire à côté sans
+rien dire serait pire qu'un refus, on croirait avoir peint là où rien n'a été
+posé.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
@@ -1727,6 +1790,7 @@ atteignable à la main, pas un état forcé qui pourrait mentir :
 | `TITI_SCREENSHOT_DBLCLICK=<sélecteur>` | double-clique un élément | un vrai `dblclick` (renommage d'onglet) |
 | `TITI_SCREENSHOT_FILL=<sélecteur>\|<valeur>` | remplit un champ | le `value` natif puis un vrai `input` |
 | `TITI_SCREENSHOT_TYPE=<texte>` | tape puis valide | de vrais événements `char`, puis `Entrée` |
+| `TITI_SCREENSHOT_PAINT=x1,y1,x2,y2` | peint un trait | de vrais événements souris, en fractions de la fenêtre |
 | `TITI_SCREENSHOT_CLICK_WAIT=20000` | attend après le clic | un clic peut lancer une opération longue |
 
 Une capture qui n'aboutit pas **échoue** au lieu de pendre : un filet sort en
@@ -1759,7 +1823,7 @@ jetable sans toucher au vrai.
 | 1.1 | Mesurer | **fait** — `bench/`, 16 scénarios, `RESULTS.md` |
 | 1.2 | Moteur rapide | **fait** — dépack de sections × 10,7, `RegionStore` (set-10M × 6,7), aperçu binaire et incrémental × 11,1 (−82 % sur le total), pool de fils × 2,4 sur `terrain`, plafonds réglables. Reste : aperçu découpé par chunk, `getBlock` sans allocation |
 | 1.3 | Entités | block entities **faites** (portées par les opérations et l'export décalé, biomes compris) ; entités mobiles (`entities/*.mca`) à venir |
-| 3 | Brushs | à venir |
+| 3 | Brushs | **fait** — viser, glisser, peindre ; sphère, cube et disque ; poser, effacer, remplacer ; un trait = une annulation. Reste : l'application locale avant envoi, pour le retour immédiat sur un gros rayon |
 | 4 | Tracés, PNJ, dispersion | à venir |
 | 5 | Outils de génération | à venir |
 

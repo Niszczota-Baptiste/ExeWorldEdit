@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (381 tests aujourd'hui : 320 moteur, 61 desktop)
+npm test          # tous les paquets (401 tests aujourd'hui : 326 moteur, 75 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -104,6 +104,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Une chose qui dépend d'où vivent les données | une méthode du `StorageAdapter` + son cas dans la suite de contrat (`test/storage.test.js`) |
 | Un plafond réglable | `DEFAULT_LIMITS` + son entrée dans `LIMIT_RANGES` (`src/staging/geometry.js`), jamais une variable d'environnement. L'interface génère son champ depuis les bornes, il n'y a rien à écrire côté renderer |
 | Une capacité pour le renderer | la méthode dans `apps/desktop/src/engine/index.js`, puis son nom dans `ENGINE_METHODS` du preload |
+| Un réglage de pinceau | `BRUSH_SHAPES` / `BRUSH_MODES` (`apps/desktop/src/renderer/viewport/brush.js`) — pur, testé sans navigateur |
 | Un écran d'outil (pas une opération) | un composant dans `apps/desktop/src/renderer/shell/tools/`, son entrée dans `TOOL_PANELS` (`Inspector.jsx`), et son bouton principal envoyé dans `ActionSlot` par un portail |
 | Une conversion pixels → grille | `apps/desktop/src/renderer/grid/pixels.js` (pur, testé sans navigateur) ; ce qui touche un canvas va dans `draw.js` |
 | Un outil dans l'interface | `TOOLS` et `TOOL_OPS` (`apps/desktop/src/renderer/store.js`) — l'inspecteur génère ses champs depuis le descripteur du moteur, il n'y a pas de formulaire à écrire. Un outil SANS opérations doit avoir sa note dans `TOOL_NOTES`, sinon l'inspecteur reste muet |
@@ -122,8 +123,8 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 ## Ce qui n'est pas encore là
 
 Entités mobiles (`entities/*.mca`), aperçu découpé par chunk, `getBlock` sans
-allocation, le pinceau (phase 3), et la liste réelle
-des blocs `minefield:*` — elle appartient au serveur, pas à ce dépôt, et se
+allocation, l'application locale du pinceau (aujourd'hui le trait part au moteur
+au relâchement), et la liste réelle des blocs `minefield:*` — elle appartient au serveur, pas à ce dépôt, et se
 déclare dans `blocks.json`. Détail, écarts assumés avec le site et ordre
 des phases : **`docs/desktop.md`**.
 
@@ -264,6 +265,21 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   allocations par bloc pour une palette de dix. Un index `Map` construit une
   fois par section : × 3,5. Corollaire : les opérations parcourent en YZX, donc
   un mémo d'UNE case sur la section résolue supprime les recherches de chunk.
+- **Trois coordonnées ne tiennent pas dans 53 bits.** La clé entière du
+  dédoublonnage d'un trait (21 bits par axe) dépassait `MAX_SAFE_INTEGER` : les
+  arrondis faisaient collisionner des cases distinctes — vingt-sept rendues
+  comme vingt-trois, attrapé par le test. Une clé texte ici est acceptable : on
+  en fabrique une par case d'un TRAIT, pas par bloc d'un build.
+- **Un pinceau qui n'interpole pas est un tampon.** La souris n'envoie qu'une
+  poignée de positions par seconde : à vitesse normale, deux brosses
+  consécutives sont à dix blocs l'une de l'autre, et le trait sort en taches
+  séparées. `lineBetween` relie les brosses successives — et refuse de relier un
+  saut démesuré, qui tracerait une barre à travers tout le build.
+- **Poser et effacer ne visent pas la même case.** Un rayon touche une FACE,
+  donc un plan entre deux cases, et `Math.floor` y tombe d'un côté ou de l'autre
+  selon l'arrondi. On s'écarte d'un demi-pas le long de la normale : dehors pour
+  poser, dedans pour effacer. C'est la différence entre poser un bloc sur la
+  table et remplacer la table.
 - **On ne redistribue PAS les assets de Mojang.** Les embarquer dans
   l'installeur exposerait celui qui le diffuse — l'EULA l'interdit. On lit
   l'installation de l'utilisateur, comme le font WorldPainter, Amulet et

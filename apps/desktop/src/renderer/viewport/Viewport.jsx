@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { voxelFromHit, brushPositions, lineBetween, Stroke } from './brush.js';
 import * as THREE from 'three';
 import { sparseToChunks, paddedChunk, createMeshPool, CH } from './voxels.js';
 import { buildTables } from './blockColors.js';
@@ -15,7 +16,7 @@ import { buildTables } from './blockColors.js';
 const SKY_TOP = 0x2A3A48;
 const SKY_BOTTOM = 0x171E25;
 
-export default function Viewport({ geometry, layerY, onStats, onHover }) {
+export default function Viewport({ geometry, layerY, onStats, onHover, brush, onStroke }) {
   const hostRef = useRef(null);
   const stateRef = useRef(null);
   const [ready, setReady] = useState(false);
@@ -85,6 +86,104 @@ export default function Viewport({ geometry, layerY, onStats, onHover }) {
       host.removeChild(renderer.domElement);
     };
   }, []);
+
+  // ── Pinceau : viser, peindre, envoyer ────────────────────────────────────
+  //
+  // Le trait est accumulé ICI et envoyé d'un bloc au relâchement. Un appel au
+  // moteur par déplacement de souris ferait un aller-retour par pixel et une
+  // entrée d'annulation par pixel — le pinceau serait inutilisable et
+  // l'annulation aussi.
+  useEffect(() => {
+    const state = stateRef.current;
+    if (!ready || !state) return undefined;
+    const dom = state.renderer.domElement;
+    const actif = !!brush;
+    state.controls.setActive(!actif);
+
+    // Le curseur : une boîte filaire posée sur la case visée. Sans repère
+    // visuel, on vise à l'aveugle — la face touchée n'est pas celle qu'on croit
+    // dès que la caméra est de biais.
+    if (!state.curseur) {
+      const geo = new THREE.BoxGeometry(1, 1, 1);
+      const edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(geo),
+        new THREE.LineBasicMaterial({ color: 0xF2C14E, depthTest: false, transparent: true, opacity: 0.9 }),
+      );
+      edges.renderOrder = 999;
+      edges.visible = false;
+      state.scene.add(edges);
+      state.curseur = edges;
+      geo.dispose();
+    }
+    state.curseur.visible = false;
+    if (!actif) return () => { if (state.curseur) state.curseur.visible = false; };
+
+    const ndc = new THREE.Vector2();
+    const versNdc = (e) => {
+      const r = dom.getBoundingClientRect();
+      ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      return ndc;
+    };
+
+    let trait = null;
+    // Dernier centre posé : un trait relie les brosses successives, sans quoi
+    // un mouvement rapide laisse des taches au lieu d'une trace.
+    let dernier = null;
+    const caseVisee = (e) => {
+      const hit = pick(state, versNdc(e));
+      return hit ? voxelFromHit(hit.point, hit.normal, brush.mode) : null;
+    };
+    const poser = (v) => {
+      if (!v) return;
+      const d = Math.max(1, 2 * brush.radius + 1);
+      state.curseur.scale.set(d, brush.shape === 'disc' ? 1 : d, d);
+      state.curseur.position.set(v.x + 0.5, v.y + 0.5, v.z + 0.5);
+      state.curseur.visible = true;
+    };
+
+    const etaler = (v) => {
+      for (const c of (dernier ? lineBetween(dernier, v) : [v])) {
+        trait.add(brushPositions(c, { shape: brush.shape, radius: brush.radius, limits: brush.limits }));
+      }
+      dernier = v;
+    };
+    const onMove = (e) => {
+      const v = caseVisee(e);
+      poser(v);
+      if (trait && v) etaler(v);
+    };
+    const onDown = (e) => {
+      if (e.button !== 0) return;
+      const v = caseVisee(e);
+      if (!v) return;
+      e.preventDefault();
+      dom.setPointerCapture(e.pointerId);
+      trait = new Stroke();
+      dernier = null;
+      etaler(v);
+    };
+    const onUp = (e) => {
+      dom.releasePointerCapture?.(e.pointerId);
+      if (!trait) return;
+      const positions = trait.positions();
+      trait = null;
+      if (positions.length) onStroke?.(positions);
+    };
+    const onLeave = () => { state.curseur.visible = false; };
+
+    dom.addEventListener('pointermove', onMove);
+    dom.addEventListener('pointerdown', onDown);
+    dom.addEventListener('pointerup', onUp);
+    dom.addEventListener('pointerleave', onLeave);
+    return () => {
+      dom.removeEventListener('pointermove', onMove);
+      dom.removeEventListener('pointerdown', onDown);
+      dom.removeEventListener('pointerup', onUp);
+      dom.removeEventListener('pointerleave', onLeave);
+      state.controls.setActive(true);
+      if (state.curseur) state.curseur.visible = false;
+    };
+  }, [ready, brush, onStroke]);
 
   // ── (Re)maillage quand la géométrie change ───────────────────────────────
   useEffect(() => {
@@ -209,7 +308,34 @@ function frameBuild(state, geometry) {
   state.controls.sync();
 }
 
-function pick() { return null; } // survol du bloc visé : phase 3 (curseur de brush)
+/**
+ * Bloc visé par le curseur, ou `null` si le rayon ne touche rien.
+ *
+ * On lance le rayon contre les MAILLAGES et pas contre les données : le
+ * maillage est déjà là, il est à jour, et three sait l'interroger avec un
+ * partitionnement. Refaire une traversée de voxels à côté voudrait dire deux
+ * représentations du même build qui peuvent diverger — et la divergence se
+ * verrait comme un pinceau qui peint à côté de ce qu'on vise.
+ *
+ * Le maillage est greedy : une face peut couvrir cent blocs. C'est pour ça
+ * qu'on rend le POINT et la NORMALE plutôt qu'un indice de face, et que le
+ * calcul de la case revient à `brush.js`, qui sait de quel côté se placer.
+ */
+function pick(state, ndc) {
+  if (!state?.meshes?.size) return null;
+  state.raycaster ??= new THREE.Raycaster();
+  state.raycaster.setFromCamera(ndc, state.camera);
+  const hits = state.raycaster.intersectObjects([...state.meshes.values()], false);
+  if (!hits.length) return null;
+  const h = hits[0];
+  if (!h.face) return null;
+  // La normale est locale au maillage ; les maillages de chunk ne sont que
+  // translatés, donc elle vaut aussi en repère monde. La normaliser quand même
+  // coûte trois multiplications et survit à une rotation qu'on ajouterait un
+  // jour sans y penser.
+  const n = h.face.normal.clone().transformDirection(h.object.matrixWorld).round();
+  return { point: { x: h.point.x, y: h.point.y, z: h.point.z }, normal: { x: n.x, y: n.y, z: n.z }, distance: h.distance };
+}
 
 /**
  * Orbite + vol maison. `OrbitControls` de three ferait l'affaire, mais il vient
@@ -224,8 +350,14 @@ function makeOrbit(dom, camera, target) {
   const move = new THREE.Vector3();
   const keys = new Set();
   let dragging = false, lastX = 0, lastY = 0;
+  // Pendant qu'on peint, faire tourner la caméra en même temps rendrait le
+  // trait inutilisable. Le pinceau prend la main sur le bouton gauche.
+  let actif = true;
 
-  const onDown = (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; dom.setPointerCapture(e.pointerId); };
+  const onDown = (e) => {
+    if (!actif) return;
+    dragging = true; lastX = e.clientX; lastY = e.clientY; dom.setPointerCapture(e.pointerId);
+  };
   const onUp = (e) => { dragging = false; dom.releasePointerCapture?.(e.pointerId); };
   const onMove = (e) => {
     if (!dragging) return;
@@ -282,6 +414,8 @@ function makeOrbit(dom, camera, target) {
       );
       camera.lookAt(target);
     },
+    /** Le pinceau coupe l'orbite le temps d'un trait. La molette reste. */
+    setActive(v) { actif = v; if (!v) dragging = false; },
     dispose() {
       dom.removeEventListener('pointerdown', onDown);
       dom.removeEventListener('pointerup', onUp);

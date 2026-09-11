@@ -208,6 +208,98 @@ test('rescanExtent découvre une région ajoutée HORS de l’emprise courante',
   assert.deepEqual(p.size, { x: 601, y: 5, z: 8 }, 'l’emprise couvre les DEUX régions');
 });
 
+// ── Pinceau ─────────────────────────────────────────────────────────────────
+
+test('un trait écrit les cases données, et rien d’autre', async () => {
+  const { staging, project } = makeProject();
+  // Trois cases éparses : c'est ce qui distingue un trait d'une sélection.
+  const positions = Int32Array.from([1, 1, 1, 5, 2, 3, 9, 7, 2]);
+  const res = await staging.applyStroke({
+    project: project(), positions, block: { name: OAK }, actor: 'moi',
+  });
+  assert.equal(res.blocksChanged, 3);
+  assert.deepEqual(res.bounds, { min: { x: 1, y: 1, z: 1 }, max: { x: 9, y: 7, z: 3 } });
+
+  const store = staging.loadStore(project());
+  await store.warmup(buildExtent(project()));
+  assert.equal(store.getBlock(1, 1, 1).Name, OAK);
+  assert.equal(store.getBlock(5, 2, 3).Name, OAK);
+  assert.equal(store.getBlock(9, 7, 2).Name, OAK);
+  // Une case entre deux, que le trait ne cite pas, n'a pas bougé.
+  assert.equal(store.getBlock(5, 2, 4), null);
+});
+
+test('un trait sans bloc EFFACE', async () => {
+  const { staging, project } = makeProject();
+  // Le sol de pierre du projet d'essai est en y = 0.
+  const positions = Int32Array.from([2, 0, 2, 3, 0, 2]);
+  const res = await staging.applyStroke({ project: project(), positions, block: null, actor: 'moi' });
+  assert.equal(res.blocksChanged, 2);
+  const store = staging.loadStore(project());
+  await store.warmup(buildExtent(project()));
+  assert.equal(store.getBlock(2, 0, 2), null);
+  assert.equal(store.getBlock(4, 0, 2).Name, STONE, 'la case voisine reste');
+});
+
+test('un trait ENTIER ne fait qu’une annulation', async () => {
+  // Un instantané par déplacement de souris remplirait la pile en trois
+  // secondes, et rendrait l'annulation inutilisable.
+  const { staging, project } = makeProject();
+  const avant = staging.undoDepth('p1');
+  const positions = [];
+  for (let i = 0; i < 200; i++) positions.push(i % 16, 5, Math.floor(i / 16));
+  await staging.applyStroke({
+    project: project(), positions: Int32Array.from(positions), block: { name: OAK }, actor: 'moi',
+  });
+  assert.equal(staging.undoDepth('p1'), avant + 1);
+
+  // Et elle annule TOUT le trait.
+  await staging.undoLast({ project: project(), actor: 'moi' });
+  const store = staging.loadStore(project());
+  await store.warmup(buildExtent(project()));
+  assert.equal(store.getBlock(0, 5, 0), null);
+  assert.equal(store.getBlock(15, 5, 12), null);
+});
+
+test('un trait qui déborde est REFUSÉ, pas rogné en silence', async () => {
+  // Écrire à côté sans rien dire serait pire qu'un refus : on croirait avoir
+  // peint là où rien n'a été posé.
+  const { staging, project } = makeProject();
+  await assert.rejects(
+    () => staging.applyStroke({
+      project: project(), positions: Int32Array.from([1, 1, 1, 9999, 1, 1]), block: { name: OAK }, actor: 'moi',
+    }),
+    /out_of_bounds/,
+  );
+});
+
+test('un trait malformé ou démesuré est refusé', async () => {
+  const { staging, project } = makeProject();
+  for (const mauvais of [[], [1, 2], [1, 2, 3, 4]]) {
+    await assert.rejects(
+      () => staging.applyStroke({ project: project(), positions: mauvais, block: { name: OAK }, actor: 'moi' }),
+      /bad_stroke/,
+      JSON.stringify(mauvais),
+    );
+  }
+  const trop = new Int32Array(3 * (500_000 + 1));
+  await assert.rejects(
+    () => staging.applyStroke({ project: project(), positions: trop, block: { name: OAK }, actor: 'moi' }),
+    /selection_too_large/,
+  );
+});
+
+test('repasser au même endroit ne change rien une deuxième fois', async () => {
+  // `blocksChanged` est la seule chose que l'utilisateur lit : elle doit
+  // compter ce qui a VRAIMENT changé.
+  const { staging, project } = makeProject();
+  const positions = Int32Array.from([4, 4, 4, 5, 4, 4]);
+  const a = await staging.applyStroke({ project: project(), positions, block: { name: OAK }, actor: 'moi' });
+  const b = await staging.applyStroke({ project: project(), positions, block: { name: OAK }, actor: 'moi' });
+  assert.equal(a.blocksChanged, 2);
+  assert.equal(b.blocksChanged, 0);
+});
+
 // ── Renommer ────────────────────────────────────────────────────────────────
 
 test('renommer ne perd NI le travail NI l’historique NI la source', async () => {

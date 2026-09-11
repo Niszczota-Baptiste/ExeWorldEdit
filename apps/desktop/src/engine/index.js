@@ -623,6 +623,18 @@ const methods = {
     onProgress: (phase, pct) => send({ event: 'progress', operation: 'panel', phase, pct }),
   }).then((res) => ({ ...res, project: projectState(project(id)) })),
 
+  /**
+   * Un trait de pinceau : des cases éparses, toutes du même bloc.
+   *
+   * Le renderer n'envoie PAS les anciennes valeurs. Le moteur est la source de
+   * vérité : un renderer désynchronisé ferait réécrire à l'annulation des blocs
+   * qui n'ont jamais existé.
+   */
+  applyStroke: ({ id, positions, block }) => staging.applyStroke({
+    project: project(id), positions, block, actor: 'local',
+    onProgress: (phase, pct) => send({ event: 'progress', operation: 'brush', phase, pct }),
+  }).then((res) => ({ ...res, project: projectState(project(id)) })),
+
   applyMapBlocks: ({ id, selection, names }) => staging.applyMapBlocks({
     project: project(id), selection, names, actor: 'local',
     onProgress: (phase, pct) => send({ event: 'progress', operation: 'map', phase, pct }),

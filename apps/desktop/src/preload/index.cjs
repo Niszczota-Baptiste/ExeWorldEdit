@@ -18,6 +18,7 @@ const ENGINE_METHODS = [
   'resourcePackInfo', 'setResourcePacks', 'blockIcons',
   // Panneau, carte en blocs, relief : l'interface prépare la grille, le moteur l'écrit.
   'textSvg', 'panelPresets', 'mapPalette', 'applyPanel', 'applyMapBlocks', 'applyHeightmap', 'exportHeightmap',
+  'applyStroke',
   'info',
 ];
 

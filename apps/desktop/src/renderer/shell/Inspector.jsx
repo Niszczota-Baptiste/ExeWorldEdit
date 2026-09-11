@@ -6,6 +6,7 @@ import { TOOL_OPS, TOOLS, TOOL_NOTES } from '../tools.js';
 import PanelTool from './tools/PanelTool.jsx';
 import HeightmapTool from './tools/HeightmapTool.jsx';
 import LibraryTool from './tools/LibraryTool.jsx';
+import BrushTool from './tools/BrushTool.jsx';
 import { ActionSlot } from './actionSlot.js';
 
 /**
@@ -16,6 +17,7 @@ import { ActionSlot } from './actionSlot.js';
  * noms de blocs, des hauteurs — que seule l'interface peut fabriquer.
  */
 const TOOL_PANELS = {
+  brush: BrushTool,
   panel: PanelTool,
   heightmap: HeightmapTool,
   library: LibraryTool,
