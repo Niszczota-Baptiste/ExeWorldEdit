@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { FsAdapter } from '../src/storage/index.js';
-import { createStaging, createLibrary, buildExtent, buildLimits, validateSelection } from '../src/staging/index.js';
+import { createStaging, createLibrary, buildExtent, buildLimits, scanLimits, validateSelection, blankRegions } from '../src/staging/index.js';
+import { RegionStore } from '../src/worldedit/regionStore.js';
 import { buildRegion, readBack, readBackEntities } from './fixtures/region.js';
 
 // Bout-en-bout du staging porté sur le StorageAdapter. C'est LE filet de
@@ -138,6 +139,73 @@ test('les limites d’édition ouvrent toute la hauteur du monde, pas l’empris
   assert.equal(lim.max.y, 319);
   assert.equal(lim.min.x, 0);
   assert.equal(lim.max.x, 15, 'X et Z restent bornés par le build');
+});
+
+// ── Retrouver une emprise qu'on ne connaît pas encore ───────────────────────
+
+test('scanLimits couvre les régions PRÉSENTES, sur toute la hauteur du monde', () => {
+  const box = scanLimits([{ regionX: 0, regionZ: 0 }, { regionX: 1, regionZ: -1 }]);
+  assert.deepEqual(box.min, { x: 0, y: -64, z: -512 });
+  assert.deepEqual(box.max, { x: 1023, y: 319, z: 511 });
+});
+
+test('scanLimits sans région ne rend rien plutôt qu’une boîte vide', () => {
+  assert.equal(scanLimits([]), null);
+  assert.equal(scanLimits(undefined), null);
+});
+
+test('rescanExtent retrouve l’emprise d’un projet ouvert à 1 × 1 × 1', async () => {
+  // C'est l'état exact d'une save au moment où on l'ouvre : les régions sont
+  // là, mais on ne sait pas encore ce qu'elles contiennent, donc l'emprise est
+  // un remplissage. Balayer À PARTIR d'elle ne regarde qu'une colonne — et une
+  // save entière s'ouvrait ainsi en 1 × 1 × 1, viewport vide.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'we-rescan-'));
+  roots.push(root);
+  const adapter = new FsAdapter({ root });
+  const staging = createStaging(adapter);
+
+  adapter.saveProject({ id: 'w1', name: 'save', min: { x: 0, y: -64, z: 0 }, size: { x: 1, y: 1, z: 1 } });
+  // Le contenu évite volontairement la colonne (0, 0) : c'est la seule que
+  // l'ancien balayage regardait.
+  const blocks = [];
+  for (let x = 4; x <= 9; x++) for (let z = 6; z <= 11; z++) blocks.push({ x, y: 5, z, Name: STONE });
+  adapter.attachSource('w1', { name: 'r.0.0.mca', buffer: buildRegion(blocks) });
+
+  const bounds = await staging.rescanExtent(adapter.getProject('w1'));
+  assert.deepEqual(bounds.min, { x: 4, y: 5, z: 6 });
+  assert.deepEqual(bounds.max, { x: 9, y: 5, z: 11 });
+  assert.deepEqual(adapter.getProject('w1').size, { x: 6, y: 1, z: 6 });
+});
+
+test('rescanExtent découvre une région ajoutée HORS de l’emprise courante', async () => {
+  // Le cas « charger les régions voisines » : la nouvelle région ne recoupe
+  // pas l'emprise d'avant, donc un balayage fondé sur celle-ci ne la verrait
+  // jamais — elle resterait chargée mais invisible.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'we-rescan2-'));
+  roots.push(root);
+  const adapter = new FsAdapter({ root });
+  const staging = createStaging(adapter);
+  adapter.saveProject({ id: 'w2', name: 'save', min: { x: 0, y: -64, z: 0 }, size: { x: 1, y: 1, z: 1 } });
+
+  const regions = blankRegions({ origin: { x: 0, y: 0, z: 0 }, size: { x: 1024, y: 1, z: 16 } });
+  const store = new RegionStore(regions);
+  await store.warmup({ min: { x: 0, y: 0, z: 0 }, max: { x: 1023, y: 16, z: 15 } });
+  for (const [x, y, z] of [[10, 3, 5], [14, 3, 7], [600, 7, 9], [610, 7, 12]]) {
+    store.setBlock(x, y, z, { Name: STONE, Properties: null });
+  }
+  const commit = store.commit({ touchedOnly: false });
+  const seeded = regions.map((r) => ({ ...r, buffer: commit.get(`${r.regionX},${r.regionZ}`) || r.buffer }));
+  assert.equal(seeded.length, 2, 'deux régions côte à côte');
+
+  staging.seedRegions('w2', seeded.slice(0, 1));
+  await staging.rescanExtent(adapter.getProject('w2'));
+  assert.deepEqual(adapter.getProject('w2').size, { x: 5, y: 1, z: 3 }, 'emprise de la première région');
+
+  staging.seedRegions('w2', seeded.slice(1));
+  await staging.rescanExtent(adapter.getProject('w2'));
+  const p = adapter.getProject('w2');
+  assert.deepEqual(p.min, { x: 10, y: 3, z: 5 });
+  assert.deepEqual(p.size, { x: 601, y: 5, z: 8 }, 'l’emprise couvre les DEUX régions');
 });
 
 // ── Undo / redo ─────────────────────────────────────────────────────────────
@@ -1129,6 +1197,73 @@ test('deriveSparse distingue la boîte DEMANDÉE des blocs TROUVÉS', async () =
     min: { x: 3, y: 4, z: 5 },
     max: { x: 6, y: 9, z: 8 },
   });
+});
+
+test('contentBounds serre le contenu, et est INDIFFÉRENT au budget d’aperçu', async () => {
+  const { RegionStore } = await import('../src/worldedit/regionStore.js');
+  const store = new RegionStore([{
+    regionX: 0, regionZ: 0,
+    buffer: buildRegion([
+      { x: 3, y: 4, z: 5, Name: STONE },
+      { x: 6, y: 4, z: 5, Name: STONE },
+      { x: 3, y: 9, z: 8, Name: OAK },
+    ]),
+  }]);
+  const box = { min: { x: 0, y: 0, z: 0 }, max: { x: 15, y: 15, z: 15 } };
+  await store.warmup(box);
+
+  assert.deepEqual(store.contentBounds(box), { min: { x: 3, y: 4, z: 5 }, max: { x: 6, y: 9, z: 8 } });
+
+  // Le point de la manœuvre : `deriveSparse` TRONQUE et ses bornes ne valent
+  // alors plus qu'une borne inférieure. Une région de vrai terrain dépasse le
+  // budget d'un ordre de grandeur — resserrer une emprise dessus couperait le
+  // build là où le balayage s'est arrêté.
+  const tronque = store.deriveSparse(box, 1, { truncate: true });
+  assert.equal(tronque.truncated, true);
+  assert.notDeepEqual(tronque.bounds, store.contentBounds(box));
+  assert.deepEqual(store.contentBounds(box), { min: { x: 3, y: 4, z: 5 }, max: { x: 6, y: 9, z: 8 } });
+});
+
+test('contentBounds : ses raccourcis rendent la MÊME chose qu’un balayage complet', async () => {
+  // `contentBounds` saute les sections tout-air, prend la boîte entière d'une
+  // section tout-plein, et ignore celles déjà comprises dans les bornes
+  // acquises. Trois raccourcis, donc trois façons de se tromper : la seule
+  // preuve utile est la comparaison au balayage sans raccourci de
+  // `deriveSparse`, budget grand ouvert.
+  const regions = blankRegions({ origin: { x: 0, y: 0, z: 0 }, size: { x: 1024, y: 1, z: 32 } });
+  const store = new RegionStore(regions);
+  const box = { min: { x: 0, y: 0, z: 0 }, max: { x: 1023, y: 47, z: 31 } };
+  await store.warmup(box);
+
+  // Une section ENTIÈREMENT pleine (le raccourci « aucun air »)…
+  for (let y = 16; y < 32; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    store.setBlock(x, y, z, { Name: STONE, Properties: null });
+  }
+  // …des blocs épars, dont un dans la SECONDE région, plus loin que tout le
+  // reste, et un autre plus haut.
+  for (const [x, y, z] of [[5, 3, 7], [900, 40, 21], [17, 45, 3], [600, 2, 30]]) {
+    store.setBlock(x, y, z, { Name: OAK, Properties: null });
+  }
+
+  const complet = store.deriveSparse(box, 1e9).bounds;
+  assert.deepEqual(store.contentBounds(box), complet);
+  assert.deepEqual(complet, { min: { x: 0, y: 2, z: 0 }, max: { x: 900, y: 45, z: 30 } });
+});
+
+test('contentBounds clipe sur la boîte demandée et ne rend rien si elle est vide', async () => {
+  const { RegionStore } = await import('../src/worldedit/regionStore.js');
+  const store = new RegionStore([{
+    regionX: 0, regionZ: 0,
+    buffer: buildRegion([{ x: 2, y: 1, z: 2, Name: STONE }, { x: 12, y: 1, z: 12, Name: STONE }]),
+  }]);
+  await store.warmup({ min: { x: 0, y: 0, z: 0 }, max: { x: 15, y: 15, z: 15 } });
+
+  assert.deepEqual(
+    store.contentBounds({ min: { x: 0, y: 0, z: 0 }, max: { x: 7, y: 15, z: 7 } }),
+    { min: { x: 2, y: 1, z: 2 }, max: { x: 2, y: 1, z: 2 } },
+    'le bloc hors de la boîte demandée ne compte pas',
+  );
+  assert.equal(store.contentBounds({ min: { x: 4, y: 0, z: 4 }, max: { x: 9, y: 15, z: 9 } }), null);
 });
 
 test('une zone vide n’invente pas de bornes', async () => {

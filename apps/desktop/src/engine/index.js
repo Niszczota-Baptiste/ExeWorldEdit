@@ -79,31 +79,16 @@ const methods = {
       buffer,
     });
 
-    // L'emprise réelle n'est connue qu'après lecture : on part de la région
-    // trouvée, puis on la resserre sur le contenu.
-    if (rc) {
-      adapter.saveExtent(id, {
-        min: { x: rc.regionX * 512, y: -64, z: rc.regionZ * 512 },
-        max: { x: rc.regionX * 512 + 511, y: 319, z: rc.regionZ * 512 + 511 },
-      });
-    }
+    // L'emprise posée ci-dessus est un remplissage : la vraie n'est connue
+    // qu'après avoir lu le contenu. `rescanExtent` balaie les régions
+    // matérialisées — pour un .zip, celles qu'il en dépaquette — et resserre.
     await methods.rescanExtent({ id });
     return projectState(project(id));
   },
 
   /** Resserre l'emprise sur les blocs réellement présents. */
   async rescanExtent({ id }) {
-    const p = project(id);
-    const store = staging.loadStore(p);
-    await store.warmup(buildLimits(p, staging.limits));
-    const sparse = store.deriveSparse(buildLimits(p, staging.limits), staging.limits.previewMaxBlocks, { truncate: true });
-    if (!sparse.count || !sparse.bounds) return projectState(p);
-    // `sparse.bounds` = les blocs TROUVÉS ; `sparse.min`/`size` = la boîte
-    // demandée. Prendre la seconde laissait un `.mca` isolé à 512 × 384 × 512
-    // quel que soit son contenu : le build apparaissait minuscule au centre du
-    // vide, et la sélection par défaut couvrait cent millions de cases vides.
-    adapter.saveExtent(id, sparse.bounds);
-    await staging.regenPreview(project(id));
+    await staging.rescanExtent(project(id));
     return projectState(project(id));
   },
 
@@ -185,6 +170,9 @@ const methods = {
     const id = `p${Date.now().toString(36)}`;
     adapter.saveProject({
       id, name: name || info.name,
+      // Emprise de REMPLISSAGE : on ne sait pas encore ce que ces régions
+      // contiennent. `rescanExtent` la remplace en balayant les régions qu'on
+      // vient de poser — c'est pour ça qu'il ne doit PAS partir de celle-ci.
       min: { x: 0, y: -64, z: 0 }, size: { x: 1, y: 1, z: 1 },
       world: { path: info.root, kind: info.kind },
     });

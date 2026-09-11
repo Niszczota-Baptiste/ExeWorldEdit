@@ -982,6 +982,87 @@ maintenant sur le build plutôt que sur la région entière.
 
 ---
 
+## Une save s'ouvrait en 1 × 1 × 1
+
+Le correctif ci-dessus marchait pour un `.mca` isolé et pour lui seul. Ouvrir
+une **save** — le cas normal — donnait un onglet « projet nabes 1 × 1 × 1 » et
+un viewport vide, alors que le sélecteur de régions venait d'annoncer
+correctement « 1 région · 4 Mo · X 0 → 511 · Z 0 → 511 ».
+
+Deux défauts empilés, et le second n'était visible qu'une fois le premier levé.
+
+### 1. Une emprise ne peut pas servir à découvrir ce qui est hors d'elle
+
+`openWorld` crée le projet avec une emprise de **remplissage** — 1 × 1 × 1 —
+parce qu'à cet instant on ne sait pas encore ce que les régions contiennent,
+puis appelle `rescanExtent` pour la remplacer. Mais `rescanExtent` balayait
+`buildLimits(projet)`, qui dérive de l'emprise enregistrée :
+
+```
+emprise 1 × 1 × 1 à (0, −64, 0)
+  → boîte balayée : x ∈ [0, 0], z ∈ [0, 0], y ∈ [−64, 319]
+  → UNE colonne, au coin de la région
+  → 0 bloc trouvé → `rescanExtent` sort sans rien changer
+  → emprise 1 × 1 × 1, pour toujours
+```
+
+Le raisonnement circulaire tenait par accident pour un `.mca` isolé : `openFile`
+pré-remplissait l'emprise depuis le nom du fichier (`r.0.0.mca` → 512 × 384 ×
+512), ce qui donnait au balayage une vraie boîte. Aucune de ces deux choses
+n'existe pour une save.
+
+Le balayage part maintenant des **régions matérialisées** (`scanLimits`,
+`geometry.js`) : l'union de leurs boîtes, sur toute la hauteur du monde. Il ne
+dépend plus de ce qu'on croit savoir du projet, seulement de ce qu'on a sous la
+main. Ça répare du même coup deux cas qui souffraient de la même cause :
+
+- **`loadMoreRegions`** — charger les régions voisines. La nouvelle région est
+  par construction *hors* de l'emprise courante : elle restait chargée mais
+  invisible.
+- **Un `.zip` de dossier `region/`** — `openFile` ne pouvait pas pré-remplir
+  l'emprise (il n'y a pas de nom de région à lire), donc il ne le faisait pas,
+  et le projet restait lui aussi à 1 × 1 × 1.
+
+`rescanExtent` a quitté `apps/desktop/src/engine/index.js` pour `staging.js`, où
+il est testable sans Electron. Les deux tests de non-régression ouvrent un
+projet exactement comme le fait une save — emprise de remplissage, contenu qui
+évite la colonne (0, 0) — et échouent tous les deux sur l'ancien code.
+
+### 2. Des bornes plafonnées par le budget d'aperçu
+
+Une fois la bonne boîte balayée, l'emprise restait fausse sur du vrai terrain,
+et cette fois sans rien d'évident à l'écran : elle était simplement trop
+petite.
+
+`rescanExtent` lisait les `bounds` de `deriveSparse`. Or `deriveSparse`
+construit aussi la **liste des blocs**, donc il est plafonné par le budget
+d'aperçu (4 M par défaut) et tronque au-delà. Tronqué, `bounds` n'est plus
+qu'une borne inférieure — ce que la documentation disait déjà, mais l'appelant
+n'en tenait pas compte. Mesuré sur une région de 5,5 M blocs, ce qui est
+**modeste** pour une région Minecraft réelle :
+
+```
+attendu          x 0..511, y 50..70, z 0..511
+deriveSparse     x 0..511, y 50..70, z 0..383     1 870 ms, tronqué
+contentBounds    x 0..511, y 50..70, z 0..511       109 ms
+```
+
+Le dernier quart du build tombait hors de l'emprise : insélectionnable et non
+rendu. `contentBounds` (`regionStore.js`) ne construit aucune liste, donc n'a
+pas de budget. Et il est **17 × plus rapide** que ce qu'il remplace, grâce à
+trois raccourcis :
+
+- une section dont la **palette** est entièrement de l'air ne se parcourt pas —
+  c'est la majorité des sections d'un monde ;
+- une section sans aucun air a pour bornes sa propre boîte ;
+- une section déjà comprise dans les bornes acquises ne peut rien élargir.
+
+Trois raccourcis, donc trois façons de se tromper : le test qui compte compare
+`contentBounds` au balayage sans raccourci de `deriveSparse`, budget grand
+ouvert, sur un jeu qui exerce les trois.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed

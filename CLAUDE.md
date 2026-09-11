@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (264 tests aujourd'hui : 239 moteur, 25 desktop)
+npm test          # tous les paquets (276 tests aujourd'hui : 251 moteur, 25 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -172,6 +172,22 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   sont le repère des coordonnées de `blocks` ; les bornes du contenu sont dans
   `bounds` (ou `null`). Resserrer une emprise sur `min`/`size` est un
   non-changement — c'est ce qui laissait un `.mca` isolé à 512 × 384 × 512.
+- **Une emprise ne peut pas servir à découvrir ce qui est HORS d'elle.**
+  `rescanExtent` balayait `buildLimits(projet)`, dérivée de l'emprise déjà
+  enregistrée. Or une save naît avec une emprise de REMPLISSAGE (1 × 1 × 1) :
+  on ne balayait donc qu'une colonne, on n'y trouvait rien, et toute save
+  s'ouvrait en 1 × 1 × 1 sur un viewport vide. Le balayage part maintenant des
+  RÉGIONS matérialisées (`scanLimits`). Même cause, même remède, pour les
+  régions voisines chargées après coup et pour un `.zip` dépaqueté en plusieurs
+  régions : hors de l'emprise, donc invisibles à jamais.
+- **Les `bounds` de `deriveSparse` sont PLAFONNÉS par le budget d'aperçu.**
+  Tronqué, il rend une borne inférieure — honnête, mais inutilisable pour
+  resserrer une emprise : mesuré sur une région de 5,5 M blocs (modeste pour du
+  vrai terrain), l'emprise s'arrêtait à z = 383 au lieu de 511, et le dernier
+  quart du build devenait insélectionnable. `contentBounds` ne construit aucune
+  liste de blocs, donc n'a pas de budget — et il est 17 × plus rapide
+  (109 ms contre 1 870), parce qu'il saute les sections tout-air par leur
+  palette et celles déjà comprises dans les bornes acquises.
 - **Un nom de fichier n'est pas une source de vérité.** `r.0.0 (16).mca` (le
   doublon de téléchargement de Windows) faisait échouer l'ouverture. Le contenu
   d'un `.mca` porte ses propres coordonnées : `regionCoordsFromContent`. Le nom

@@ -79,6 +79,34 @@ export function buildLimits(project, limits = DEFAULT_LIMITS) {
   };
 }
 
+/**
+ * Boîte à BALAYER pour retrouver l'emprise d'un projet : l'union des régions
+ * PRÉSENTES, sur toute la hauteur du monde.
+ *
+ * Pourquoi pas `buildLimits` : celle-ci dérive de l'emprise déjà enregistrée,
+ * donc elle ne peut rien découvrir en dehors. Un projet qui commence à
+ * 1 × 1 × 1 — ce qu'est toute save à l'ouverture, avant qu'on sache ce qu'elle
+ * contient — ne se balaie alors que sur UNE colonne, ne trouve rien, et reste
+ * à 1 × 1 × 1 pour toujours.
+ *
+ * @param {{regionX:number, regionZ:number}[]} regions
+ * @returns {{min,max}|null} `null` s'il n'y a aucune région
+ */
+export function scanLimits(regions, limits = DEFAULT_LIMITS) {
+  if (!regions?.length) return null;
+  let rx0 = Infinity, rz0 = Infinity, rx1 = -Infinity, rz1 = -Infinity;
+  for (const { regionX, regionZ } of regions) {
+    if (regionX < rx0) rx0 = regionX;
+    if (regionX > rx1) rx1 = regionX;
+    if (regionZ < rz0) rz0 = regionZ;
+    if (regionZ > rz1) rz1 = regionZ;
+  }
+  return {
+    min: { x: rx0 * 512, y: limits.worldMinY, z: rz0 * 512 },
+    max: { x: rx1 * 512 + 511, y: limits.worldMaxY, z: rz1 * 512 + 511 },
+  };
+}
+
 /** Conservé pour compat (extraction de zone) : alias d'emprise contenu. */
 export const buildBBox = buildExtent;
 

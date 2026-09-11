@@ -18,7 +18,7 @@ import {
   MaskedVolume, sameBlock,
 } from '../worldedit/transform.js';
 import {
-  DEFAULT_LIMITS, normalizeLimits, fdiv, buildExtent, buildLimits, validateSelection,
+  DEFAULT_LIMITS, normalizeLimits, fdiv, buildExtent, buildLimits, scanLimits, validateSelection,
   clampBBox, unionBBox, regionKeysForBBox, panelPlane, weightedPicker,
   PANEL_PRESETS, clamp01, tick, phaseTimer,
 } from './geometry.js';
@@ -308,6 +308,35 @@ export function createStaging(adapter, options = {}) {
     const store = loadStore(project);
     await store.warmup(bbox);
     writePreview(project.id, store.deriveSparse(bbox, limits.previewMaxBlocks, { truncate: true }));
+  }
+
+  /**
+   * Resserre l'emprise du projet sur les blocs RÉELLEMENT présents, puis
+   * régénère l'aperçu. Rend les nouvelles bornes, ou `null` si le staging est
+   * vide (l'emprise est alors laissée telle quelle).
+   *
+   * Le balayage part des RÉGIONS matérialisées, jamais de l'emprise courante :
+   * une emprise ne peut pas servir à découvrir ce qui est en dehors d'elle.
+   * C'est le défaut qui ouvrait toute save en 1 × 1 × 1 — le projet naît avec
+   * une emprise de remplissage, on ne balayait donc qu'une colonne, et on n'y
+   * trouvait rien.
+   */
+  async function rescanExtent(project) {
+    // `loadStore` matérialise : après lui, et seulement après, les fichiers de
+    // région existent (un .zip importé n'est dépaqueté qu'ici).
+    const store = loadStore(project);
+    const scan = scanLimits(listRegionFiles(project.id), limits) || buildLimits(project, limits);
+    await store.warmup(scan);
+    // `contentBounds` et PAS les `bounds` de `deriveSparse` : ces derniers sont
+    // plafonnés par le budget d'aperçu, et une région de vrai terrain le dépasse
+    // largement. L'emprise s'arrêterait alors là où le balayage a été coupé.
+    const bounds = store.contentBounds(scan);
+    // Rien du tout : on laisse l'emprise telle quelle plutôt que d'en inventer
+    // une. Un projet vide reste ouvrable, et la prochaine écriture l'agrandira.
+    if (!bounds) return null;
+    adapter.saveExtent(project.id, bounds);
+    await regenPreview(adapter.getProject(project.id));
+    return bounds;
   }
 
   /**
@@ -878,6 +907,7 @@ export function createStaging(adapter, options = {}) {
     redoLast,
     resetStaging,
     regenPreview,
+    rescanExtent,
     // sortie
     exportBuild,
     cropBuild,

@@ -397,6 +397,78 @@ export class RegionStore {
     return out;
   }
 
+  /**
+   * Boîte englobante des blocs non-air d'une zone — SANS budget ni troncature.
+   *
+   * `deriveSparse` rend la même chose dans `bounds`, mais comme il construit en
+   * plus la liste des blocs il est plafonné : une fois tronqué, ses bornes ne
+   * sont plus qu'une borne INFÉRIEURE. Pour resserrer une emprise c'est
+   * inutilisable — une région de vrai terrain dépasse le budget d'aperçu d'un
+   * ordre de grandeur, et l'emprise s'arrêterait au chunk où le balayage a été
+   * coupé (mesuré : z 0..383 au lieu de 0..511 sur une région de 5,5 M blocs).
+   *
+   * Suppose un warmup couvrant `bbox`.
+   * @returns {{min,max}|null} `null` si la zone est vide
+   */
+  contentBounds(bbox) {
+    let bx0 = Infinity, by0 = Infinity, bz0 = Infinity;
+    let bx1 = -Infinity, by1 = -Infinity, bz1 = -Infinity;
+    for (const r of this.regions.values()) {
+      if (!r.chunks) continue;
+      for (const rec of r.chunks.values()) {
+        if (!rec.sections) continue;
+        const baseX = rec.chunk.chunkX * 16;
+        const baseZ = rec.chunk.chunkZ * 16;
+        if (baseX > bbox.max.x || baseX + 15 < bbox.min.x) continue;
+        if (baseZ > bbox.max.z || baseZ + 15 < bbox.min.z) continue;
+        for (const [sy, sec] of rec.sections) {
+          const baseY = sy * 16;
+          if (baseY > bbox.max.y || baseY + 15 < bbox.min.y) continue;
+
+          // Part de section réellement concernée, une fois clipée.
+          const x0 = Math.max(baseX, bbox.min.x), x1 = Math.min(baseX + 15, bbox.max.x);
+          const y0 = Math.max(baseY, bbox.min.y), y1 = Math.min(baseY + 15, bbox.max.y);
+          const z0 = Math.max(baseZ, bbox.min.z), z1 = Math.min(baseZ + 15, bbox.max.z);
+          // Déjà entièrement DANS les bornes acquises : la parcourir ne peut
+          // rien élargir. C'est ce qui rend le balayage d'un gros build à peu
+          // près gratuit passé les premières sections.
+          if (x0 >= bx0 && x1 <= bx1 && y0 >= by0 && y1 <= by1 && z0 >= bz0 && z1 <= bz1) continue;
+
+          // La PALETTE avant les indices : une section entièrement d'air ne
+          // demande aucun parcours, et c'est le cas de la plupart des sections
+          // d'un monde. Une section entièrement pleine n'en demande pas non
+          // plus — ses bornes sont sa propre boîte.
+          const { palette: pal, indices } = sec.grid;
+          let airs = 0;
+          for (const e of pal) if (isAir(e)) airs++;
+          if (airs === pal.length) continue;
+          if (airs === 0) {
+            if (x0 < bx0) bx0 = x0; if (x1 > bx1) bx1 = x1;
+            if (y0 < by0) by0 = y0; if (y1 > by1) by1 = y1;
+            if (z0 < bz0) bz0 = z0; if (z1 > bz1) bz1 = z1;
+            continue;
+          }
+
+          const solide = pal.map((e) => !isAir(e));
+          for (let n = 0; n < SECTION_VOLUME; n++) {
+            if (!solide[indices[n]]) continue;
+            const x = baseX + (n & 15);
+            if (x < x0 || x > x1) continue;
+            const z = baseZ + ((n >> 4) & 15);
+            if (z < z0 || z > z1) continue;
+            const y = baseY + ((n >> 8) & 15);
+            if (y < y0 || y > y1) continue;
+            if (x < bx0) bx0 = x; if (x > bx1) bx1 = x;
+            if (y < by0) by0 = y; if (y > by1) by1 = y;
+            if (z < bz0) bz0 = z; if (z > bz1) bz1 = z;
+          }
+        }
+      }
+    }
+    if (bx0 === Infinity) return null;
+    return { min: { x: bx0, y: by0, z: bz0 }, max: { x: bx1, y: by1, z: bz1 } };
+  }
+
   // Re-dérive l'artefact sparse (même format que minecraftWorld/parse.js) pour
   // l'aperçu. Itère les sections déjà chargées (non-air only) — JAMAIS cellule
   // par cellule sur toute la boîte (qui peut compter des milliards de cases).
