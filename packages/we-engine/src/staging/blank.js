@@ -3,6 +3,7 @@ import {
 } from '../anvil/index.js';
 import { RegionStore } from '../worldedit/regionStore.js';
 import { makeZip } from '../worldedit/zipWriter.js';
+import { safeFileName } from '../storage/filename.js';
 import { fdiv, panelPlane, tick, DEFAULT_LIMITS } from './geometry.js';
 
 // Construction de régions .mca NEUVES : build vierge, carte en blocs autonome,
@@ -155,8 +156,6 @@ export async function buildPlaneFromNames({ template, origin, size, names, cropM
 
 // ── Mise en forme d'un téléchargement ───────────────────────────────────────
 
-const safeName = (s) => String(s || 'build').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'build';
-
 /** Une région seule sort en .mca ; plusieurs sortent zippées en `region/`. */
 export function regionsToDownload(regions, name) {
   if (regions.length === 1) {
@@ -164,5 +163,5 @@ export function regionsToDownload(regions, name) {
     return { buffer: r.buffer, filename: regionFileName(r.regionX, r.regionZ), mime: 'application/octet-stream' };
   }
   const entries = regions.map((r) => ({ name: `region/${regionFileName(r.regionX, r.regionZ)}`, data: r.buffer }));
-  return { buffer: makeZip(entries), filename: `${safeName(name)}-region.zip`, mime: 'application/zip' };
+  return { buffer: makeZip(entries), filename: `${safeFileName(name)}-region.zip`, mime: 'application/zip' };
 }

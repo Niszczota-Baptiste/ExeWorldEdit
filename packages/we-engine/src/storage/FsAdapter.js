@@ -7,6 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { StorageAdapter } from './StorageAdapter.js';
+import { safeFileName } from './filename.js';
 
 // Implémentation « poste local » du StorageAdapter : tout vit dans une
 // arborescence de fichiers, sans base de données.
@@ -53,9 +54,14 @@ const safeId = (id) => {
   return s;
 };
 const safeFile = (name, fallback) => {
-  const base = path.basename(String(name || ''));
-  const s = base.replace(/[^\w.-]+/g, '_').replace(/^\.+/, '');
-  return s.slice(0, 120) || fallback;
+  // `path.basename` d'abord : un nom venu d'un dialogue peut être un chemin.
+  // Puis les règles communes — elles gardent les accents, qu'un `\w` jetait.
+  const base = path.basename(String(name || '')).replace(/^\.+/, '');
+  const point = base.lastIndexOf('.');
+  const tige = point > 0 ? base.slice(0, point) : base;
+  const ext = point > 0 ? base.slice(point) : '';
+  const s = safeFileName(tige, { fallback: '', max: 100 });
+  return s ? `${s}${ext}`.slice(0, 120) : fallback;
 };
 const readJson = (file, fallback = null) => {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }

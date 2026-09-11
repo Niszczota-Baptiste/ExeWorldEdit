@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Minus, Square, X, Search, Pickaxe, Settings2, Gauge } from './icons.js';
 import { useApp } from '../store.js';
 
@@ -5,11 +6,44 @@ import { useApp } from '../store.js';
 // draggable (`-webkit-app-region`), les contrôles ne le sont pas — sans quoi
 // cliquer un onglet déplacerait la fenêtre.
 
+/**
+ * Renommage en place d'un onglet.
+ *
+ * Le champ prend le focus et sélectionne tout : renommer commence presque
+ * toujours par tout remplacer. `Entrée` valide, `Échap` annule, et sortir du
+ * champ vaut validation — c'est ce que fait tout renommage de fichier, et
+ * l'inverse (sortir = annuler) fait perdre la frappe.
+ */
+function TabRename({ nom, onValider, onAnnuler }) {
+  const [v, setV] = useState(nom);
+  const ref = useRef(null);
+  useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
+  return (
+    <input
+      ref={ref}
+      className="tab-rename"
+      value={v}
+      aria-label="Nom du projet"
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={() => onValider(v)}
+      onKeyDown={(e) => {
+        e.stopPropagation(); // sinon les raccourcis d'outil changent d'outil en tapant
+        if (e.key === 'Enter') { e.preventDefault(); onValider(v); }
+        if (e.key === 'Escape') { e.preventDefault(); onAnnuler(); }
+      }}
+    />
+  );
+}
+
 export default function TitleBar() {
   const projects = useApp((s) => s.projects);
   const activeId = useApp((s) => s.activeId);
   const activate = useApp((s) => s.activate);
   const closeProject = useApp((s) => s.closeProject);
+  const rename = useApp((s) => s.rename);
+  /** Onglet en cours de renommage, s'il y en a un. */
+  const [edite, setEdite] = useState(null);
   const openSettings = useApp((s) => s.setSettingsOpen);
   const perf = useApp((s) => s.settings.perf);
   const update = useApp((s) => s.updateSettings);
@@ -40,7 +74,26 @@ export default function TitleBar() {
             {/* Le point doré dit « modifications non exportées », comme la
                 pastille de sélection du viewport. Même code couleur partout. */}
             {p.pending && <span className="tab-dot" title="Modifications non exportées" />}
-            <span className="tab-name">{p.name}</span>
+            {edite === p.id
+              ? (
+                <TabRename
+                  nom={p.name}
+                  onValider={(v) => { setEdite(null); rename(p.id, v); }}
+                  onAnnuler={() => setEdite(null)}
+                />
+              )
+              : (
+                // Double-clic pour renommer, comme partout ailleurs. Renommer
+                // ne déplace rien : le dossier du projet porte son identifiant,
+                // pas son nom.
+                <span
+                  className="tab-name"
+                  title={`${p.name} — double-clic pour renommer`}
+                  onDoubleClick={(e) => { e.stopPropagation(); setEdite(p.id); }}
+                >
+                  {p.name}
+                </span>
+              )}
             <button
               className="tab-close"
               aria-label={`Fermer ${p.name}`}

@@ -14,6 +14,7 @@ import { schematicToSponge, schematicToLitematic } from '@titi/we-engine/worlded
 import { CATALOG, GROUPS, normalizeExtras } from '@titi/we-engine/blocks';
 import { renderTextSvg } from '@titi/we-engine/worldedit';
 import { flatBlockColors } from '@titi/we-engine/colors';
+import { safeFileNameExt } from '@titi/we-engine/filename';
 import { PANEL_PRESETS } from '@titi/we-engine/staging';
 
 // LE MOTEUR — tourne dans un `utilityProcess`, jamais dans le renderer.
@@ -277,12 +278,34 @@ const methods = {
       : await schematicToSponge(schem, { name: label });
     return {
       buffer,
-      filename: `${label.replace(/[^\w.-]+/g, '_').slice(0, 60) || 'build'}.${format}`,
+      filename: safeFileNameExt(label, format),
       mime: 'application/octet-stream',
       // WorldEdit ne colle les entités qu'avec `//paste -e` : l'écran d'export
       // doit le rappeler, sinon elles manqueront sans que rien ne le dise.
       note: 'entities',
     };
+  },
+
+  /**
+   * Renomme un projet. Ne touche QUE l'étiquette.
+   *
+   * C'est sans danger par construction : le dossier du projet est nommé par son
+   * `id`, jamais par son nom (`FsAdapter.projectDir`). Renommer ne déplace donc
+   * aucun fichier, ne casse aucun chemin de staging, ne perd ni l'historique
+   * d'annulation ni la source d'origine. Le nom ne sert qu'à trois choses :
+   * l'onglet, le nom de fichier proposé à l'export, et le champ `name` écrit
+   * DANS un schematic exporté.
+   *
+   * Les lettres sont gardées telles quelles — accents, coréen, emoji. C'est à
+   * l'export que le nom devient un nom de fichier, et `safeFileName` n'y retire
+   * que ce qu'un système de fichiers refuse vraiment.
+   */
+  renameProject: ({ id, name }) => {
+    const p = project(id);
+    const propre = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (!propre) throw new Error('bad_name');
+    adapter.saveProject({ ...p, name: propre });
+    return projectState(project(id));
   },
 
   closeProject: ({ id }) => { adapter.removeProject(id); return true; },

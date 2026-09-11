@@ -16,6 +16,7 @@
     "./operations": "./src/worldedit/operations.js",
     "./blocks": "./src/worldedit/blockCatalog.js",
     "./geometry": "./src/staging/geometry.js",
+    "./filename": "./src/storage/filename.js",
     "./blockstates": "./src/worldedit/blockstates.js",
     "./assets/*": "./assets/*"
   },

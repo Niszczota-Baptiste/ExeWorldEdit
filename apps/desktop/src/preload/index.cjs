@@ -8,7 +8,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 // il ne peut faire que ce qui est écrit ci-dessous.
 
 const ENGINE_METHODS = [
-  'listProjects', 'getProject', 'closeProject', 'rescanExtent',
+  'listProjects', 'getProject', 'closeProject', 'renameProject', 'rescanExtent',
   'openFile', 'openSchematic', 'openWorld', 'inspectWorldFolder', 'loadMoreRegions',
   'getGeometry',
   'apply', 'undo', 'redo', 'reset', 'audit',

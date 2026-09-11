@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (344 tests aujourd'hui : 295 moteur, 49 desktop)
+npm test          # tous les paquets (354 tests aujourd'hui : 305 moteur, 49 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -108,6 +108,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Un outil dans l'interface | `TOOLS` et `TOOL_OPS` (`apps/desktop/src/renderer/store.js`) — l'inspecteur génère ses champs depuis le descripteur du moteur, il n'y a pas de formulaire à écrire. Un outil SANS opérations doit avoir sa note dans `TOOL_NOTES`, sinon l'inspecteur reste muet |
 | Un TYPE de paramètre d'opération | son champ dans `Field` (`Inspector.jsx`) ET son cas dans le constructeur de `params` juste au-dessus — un test exige les deux |
 | Un bloc au catalogue | `VANILLA` (`src/worldedit/blockCatalog.js`) pour du vanilla. Pour un `minefield:*` : `blocks.json` du dossier de données, jamais le code — ce dépôt ne connaît pas la liste du serveur |
+| Un nom qui devient un nom de FICHIER | `safeFileName` (`src/storage/filename.js`) — jamais une expression jetable sur place, et jamais `\w` |
 | Un code d'erreur | `ERREURS` (`apps/desktop/src/renderer/store.js`), en français et en disant QUOI FAIRE — un test relit les `new Error()` des deux moteurs et refuse un code sans phrase |
 | Une couleur de bloc pour le viewport | `EXTRA` dans `apps/desktop/src/renderer/viewport/blockColors.js` (en attendant l'atlas) |
 | Un réglage de l'application | `DEFAULT_SETTINGS` (`apps/desktop/src/renderer/theme.js`) + son champ dans `Settings.jsx` ; il se persiste tout seul via `readSettings`/`writeSettings` de l'adapter |
@@ -261,6 +262,19 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   allocations par bloc pour une palette de dix. Un index `Map` construit une
   fois par section : × 3,5. Corollaire : les opérations parcourent en YZX, donc
   un mémo d'UNE case sur la section résolue supprime les recherches de chunk.
+- **`\w` jette tout ce qui n'est pas de l'ASCII.** La règle de nom de fichier
+  était `[^\w.-]+ → _`. « Vallée » devenait `Vall_e`, et « 한국어 건물 » devenait
+  `_` — deux builds coréens différents sortaient sous le même nom. Or la police
+  embarquée couvre tout le BMP exprès. `safeFileName` (`storage/filename.js`)
+  ne retire que ce qu'un système de fichiers refuse VRAIMENT : les caractères
+  interdits de Windows, les noms de périphériques réservés (`CON`, `LPT1`…,
+  extension comprise), un point ou une espace en fin de nom.
+- **Renommer ne déplace rien, et c'est voulu.** Le dossier d'un projet porte son
+  IDENTIFIANT, jamais son nom (`FsAdapter.projectDir`). Un test fige la
+  propriété : après renommage, régions de staging, pile d'annulation, source et
+  date de création sont intactes. Faire un jour dériver un chemin du nom le
+  casserait — et perdrait le travail d'un utilisateur qui corrige une faute de
+  frappe.
 - **Deux moitiés testées, leur jonction non.** `toHeights` rendait des hauteurs
   en BLOCS ; `applyHeightmap` attend un rapport 0..1 et fait
   `clamp01(h) * maxH`. Chaque moitié passait ses tests ; ensemble, toute

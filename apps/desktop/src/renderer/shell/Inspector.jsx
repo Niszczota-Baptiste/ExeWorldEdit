@@ -195,9 +195,13 @@ function Export({ onExport }) {
       </div>
       {/* Le détail est dans les infobulles des boutons. Trois lignes de prose
           ici poussaient les réglages de l'opération hors de l'écran, et c'est
-          la seule chose qu'on regarde vraiment souvent. */}
+          la seule chose qu'on regarde vraiment souvent.
+          La phrase sur le nom, elle, évite une vraie surprise : on renomme
+          l'onglet et le .mca sort quand même en r.X.Z.mca. */}
       <p className="hint" title="WorldEdit ne colle les entités d’un schematic qu’avec //paste -e">
-        <code>.mca</code> : le build entier, sans perte. Schematics : la sélection.
+        <code>.mca</code> : le build entier, sans perte — une région seule garde son nom
+        <code> r.X.Z.mca</code>, c’est ce qui la rend relisible par le jeu.
+        Les schematics sortent la sélection, nommée comme l’onglet.
       </p>
     </div>
   );

@@ -413,6 +413,21 @@ export const useApp = create((set, get) => ({
     } catch (e) { get().say(errorText(e, 'suppression')); }
   },
 
+  /**
+   * Renomme un projet. L'onglet, le nom de fichier proposé à l'export et le
+   * champ `name` du schematic suivent — rien d'autre ne bouge : le dossier du
+   * projet est nommé par son identifiant, pas par son nom.
+   */
+  async rename(id, name) {
+    const avant = get().projects.find((p) => p.id === id)?.name;
+    if (!name?.trim() || name.trim() === avant) return;
+    try {
+      await api().engine.renameProject({ id, name });
+      await get().refreshProjects();
+      get().say(`Renommé : « ${name.trim()} ».`);
+    } catch (e) { get().say(errorText(e, 'renommage')); }
+  },
+
   async run(operation, params) {
     const id = get().activeId;
     const selection = get().selection;
@@ -534,6 +549,7 @@ export const ERREURS = {
   bad_direction: 'Direction invalide.',
   bad_factor: 'Facteur d’échelle invalide.',
   bad_panel: 'Panneau invalide : le masque ne couvre pas toute la zone.',
+  bad_name: 'Un nom vide n’est pas un nom.',
   biome_unsupported: 'Ce build ne porte pas de données de biome.',
   empty_box: 'La zone ne contient aucun bloc.',
   unknown_operation: 'Opération inconnue : le moteur ne la connaît pas.',

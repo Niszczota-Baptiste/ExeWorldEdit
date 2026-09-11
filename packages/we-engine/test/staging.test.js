@@ -208,6 +208,65 @@ test('rescanExtent découvre une région ajoutée HORS de l’emprise courante',
   assert.deepEqual(p.size, { x: 601, y: 5, z: 8 }, 'l’emprise couvre les DEUX régions');
 });
 
+// ── Renommer ────────────────────────────────────────────────────────────────
+
+test('renommer ne perd NI le travail NI l’historique NI la source', async () => {
+  // La crainte légitime en renommant : « est-ce que ça déplace mes fichiers ? »
+  // Non, par construction — le dossier d'un projet porte son IDENTIFIANT, pas
+  // son nom (`FsAdapter.projectDir`). Ce test le fige : si quelqu'un fait un
+  // jour dériver le chemin du nom, il tombe ici.
+  const { adapter, staging, project } = makeProject();
+
+  await staging.applyOperation({
+    project: project(), operation: 'set',
+    params: { block: { name: OAK } }, selection: ONE(2, 3, 4), actor: 'moi',
+  });
+  const avant = {
+    regions: staging.listRegionFiles('p1').map((f) => f.file).sort(),
+    undo: staging.undoDepth('p1'),
+    source: adapter.getProject('p1').source,
+    cree: adapter.getProject('p1').createdAt,
+  };
+  assert.ok(avant.undo > 0, 'il faut un historique à préserver');
+
+  adapter.saveProject({ ...project(), name: 'Muraille — côté Est 한국' });
+
+  const p = project();
+  assert.equal(p.id, 'p1', 'l’identifiant ne bouge pas');
+  assert.equal(p.name, 'Muraille — côté Est 한국', 'les lettres sont gardées telles quelles');
+  assert.deepEqual(staging.listRegionFiles('p1').map((f) => f.file).sort(), avant.regions);
+  assert.equal(staging.undoDepth('p1'), avant.undo);
+  assert.deepEqual(p.source, avant.source);
+  assert.equal(p.createdAt, avant.cree, 'la date de création n’est pas réécrite');
+
+  // Et le travail est toujours là, relisible.
+  const store = staging.loadStore(p);
+  await store.warmup(buildExtent(p));
+  assert.equal(store.getBlock(2, 3, 4).Name, OAK);
+
+  // L'annulation marche encore après le renommage.
+  await staging.undoLast({ project: project(), actor: 'moi' });
+  const apres = staging.loadStore(project());
+  await apres.warmup(buildExtent(project()));
+  assert.equal(apres.getBlock(2, 3, 4), null);
+});
+
+test('le nom de fichier d’export suit le nom du projet, lettres comprises', async () => {
+  const { adapter, staging, project } = makeProject();
+  // Deux régions : c'est le cas qui utilise le nom (une seule sort en r.X.Z.mca,
+  // et elle DOIT garder ce nom-là pour être relisible par le jeu).
+  adapter.saveProject({ ...project(), name: 'Arène N°3' });
+  const seed = blankRegions({ origin: { x: 0, y: 0, z: 0 }, size: { x: 1024, y: 1, z: 16 } });
+  staging.seedRegions('p1', seed);
+
+  const out = await staging.exportBuild(project(), null);
+  assert.equal(out.filename, 'Arène N°3-region.zip');
+
+  adapter.saveProject({ ...project(), name: 'fort/est' });
+  const out2 = await staging.exportBuild(project(), null);
+  assert.equal(out2.filename, 'fort est-region.zip', 'seul ce que le système refuse est retiré');
+});
+
 // ── Undo / redo ─────────────────────────────────────────────────────────────
 
 test('undo restaure, redo réapplique, et les profondeurs suivent', async () => {

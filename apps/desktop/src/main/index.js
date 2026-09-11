@@ -371,6 +371,23 @@ app.whenReady().then(async () => {
           })()`);
           await new Promise((r) => setTimeout(r, 600));
         }
+        // Un double-clic — le geste qui ouvre un renommage d'onglet.
+        if (process.env.TITI_SCREENSHOT_DBLCLICK) {
+          await win.webContents.executeJavaScript(
+            `document.querySelector(${JSON.stringify(process.env.TITI_SCREENSHOT_DBLCLICK)})?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })) ?? null`,
+          );
+          await new Promise((r) => setTimeout(r, 400));
+        }
+        // Du TEXTE tapé dans le champ qui a le focus, puis validé par Entrée.
+        if (process.env.TITI_SCREENSHOT_TYPE) {
+          for (const ch of process.env.TITI_SCREENSHOT_TYPE) {
+            win.webContents.sendInputEvent({ type: 'char', keyCode: ch });
+          }
+          await new Promise((r) => setTimeout(r, 300));
+          win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' });
+          win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
+          await new Promise((r) => setTimeout(r, 800));
+        }
         // Un bouton de l'interface, par son sélecteur — `.click()` sur le vrai
         // élément, donc le même chemin qu'un clic de souris.
         if (process.env.TITI_SCREENSHOT_CLICK) {

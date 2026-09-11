@@ -1326,6 +1326,68 @@ script d'automatisation, serait « le champ ne marche pas ».
 
 ---
 
+## Renommer un onglet sans rien perdre
+
+Un build s'appelle « Build » jusqu'à ce qu'on le renomme, et jusqu'ici on ne
+pouvait pas. Double-clic sur l'onglet, `Entrée` valide, `Échap` annule.
+
+### Pourquoi c'est sans danger
+
+Le dossier d'un projet porte son **identifiant**, jamais son nom :
+
+```
+<données>/projects/demo-vallee/     ← l'id, validé, jamais dérivé du nom
+  ├─ project.json   { "name": "Arène N°3 — 한국", … }
+  ├─ staging/regions/…              ← le travail
+  └─ audit.jsonl
+```
+
+Renommer réécrit un champ de `project.json` et rien d'autre : pas un fichier
+déplacé, pas un chemin de staging cassé, pas une pile d'annulation perdue. Un
+test fige la propriété — régions, profondeur d'annulation, source et date de
+création comparées avant et après. Si quelqu'un fait un jour dériver un chemin
+du nom, il tombe dessus.
+
+### Les lettres qui disparaissaient
+
+C'est l'autre moitié, et celle qui abîmait vraiment quelque chose. La règle de
+nom de fichier était `replace(/[^\w.-]+/g, '_')`. `\w` vaut `[A-Za-z0-9_]` :
+
+```
+« Vallée de Minefield »  →  Vall_e_de_Minefield
+« Arène N°3 »            →  Ar_ne_N_3
+« 한국어 건물 »            →  _
+```
+
+Le dernier cas est le pire : le nom entier est perdu, et deux builds coréens
+différents sortent sous le même fichier. Absurde pour un moteur dont la police
+embarquée couvre tout le BMP précisément pour qu'on puisse écrire du coréen.
+
+`safeFileName` ne retire que ce qu'un système de fichiers refuse **vraiment** —
+la liste de Windows, la plus stricte des trois plateformes :
+
+| Ce qui part | Pourquoi |
+|---|---|
+| `< > : " / \ \| ? *` et les caractères de contrôle | refusés par Windows |
+| `CON`, `PRN`, `NUL`, `COM1`…`LPT9`, extension comprise | noms de périphériques réservés |
+| un point ou une espace en fin de nom | Windows les coupe en silence |
+| toute suite de deux points | pour qu'aucun nom ne remonte d'un dossier |
+
+Accents, CJK, emoji, tirets cadratins : gardés. Vérifié dans l'application, pas
+seulement en test — un onglet renommé « Arène N°3 — 한국 » ressort en
+`Arène N°3 — 한국.schem`, avec ses treize niveaux d'annulation intacts.
+
+![Un onglet renommé](images/renommer-onglet.png)
+
+*Le nom custom tient dans l'onglet, dans la vignette du viewport et jusqu'au nom
+de fichier proposé à l'export. Le build, lui, n'a pas bougé d'un bloc.*
+
+Un cas garde délibérément son nom : une région seule exportée en `.mca` sort en
+`r.X.Z.mca`, parce que c'est ce nom-là qui la rend relisible par le jeu. L'écran
+d'export le dit, sans quoi c'est une surprise.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
@@ -1520,6 +1582,8 @@ atteignable à la main, pas un état forcé qui pourrait mentir :
 | `TITI_SCREENSHOT_SELECTION=x0,y0,z0,x1,y1,z1` | pose une sélection | les six champs, `focus()` puis `blur()` |
 | `TITI_SCREENSHOT_OP=mix` | choisit une opération | le vrai `<select>`, vrai `change` |
 | `TITI_SCREENSHOT_CLICK=<sélecteur>` | clique un élément | `.click()` sur le vrai bouton |
+| `TITI_SCREENSHOT_DBLCLICK=<sélecteur>` | double-clique un élément | un vrai `dblclick` (renommage d'onglet) |
+| `TITI_SCREENSHOT_TYPE=<texte>` | tape puis valide | de vrais événements `char`, puis `Entrée` |
 | `TITI_SCREENSHOT_CLICK_WAIT=20000` | attend après le clic | un clic peut lancer une opération longue |
 
 Une capture qui n'aboutit pas **échoue** au lieu de pendre : un filet sort en
@@ -1542,6 +1606,7 @@ jetable sans toucher au vrai.
 | 2.2 | Ouverture et export | **fait** — `.mca`, `.zip`, dossier de save, dossier `region/`, `.schem`, `.litematic`, glisser-déposer ; export `.mca`/`.schem`/`.litematic` ; « Appliquer au monde » avec verrou `session.lock` et sauvegarde horodatée. Reste : récupération après crash explicite (le staging est déjà persistant) |
 | 2.3 | Direction visuelle (jetons, Pretendard, roue d'outils) | **fait** |
 | 2.4 | Disposition (panneaux, inspecteur généré, palette virtualisée) | fait pour l'essentiel ; `Ctrl+K` et thème clair à venir |
+| 2.4e | Renommer un projet | **fait** — double-clic sur l'onglet ; les lettres custom survivent jusqu'au nom de fichier exporté |
 | 2.4d | Écrans « Texte et carte », « Relief », « Bibliothèque » | **fait** — texte par la police embarquée, image en couleurs ou en silhouette, relief à l'aller et au retour, rangement et reprise par le presse-papier du moteur |
 | 2.4c | Commandes complètes et catalogue de blocs | **fait** — les 29 opérations atteignables, champs `blocklist`/`pattern`/`mask`, presse-papier et biome branchés, raccourcis d'outil, catalogue de 346 blocs + `blocks.json` pour les `minefield:*`. Reste : les écrans « Texte et carte », « Relief » et « Bibliothèque », dont le moteur est prêt |
 | 2.4b | Réglages (texte, densité, accent) + mode performance | **fait** — `settings.json` via l'adapter, `theme.js` testé, relevé par phase |
