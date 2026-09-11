@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { DEFAULT_SETTINGS, normalizeSettings, applyTheme } from './theme.js';
+import { registerColors } from './viewport/blockColors.js';
 
 // État de l'application. Le renderer ne détient JAMAIS de vérité sur le build :
 // tout ce qui est ici est un reflet de ce que le moteur a répondu. Une opération
@@ -16,10 +17,10 @@ export const TOOLS = [
   { id: 'terrain', label: 'Terrain', icon: 'Mountain', key: 'G' },
   { id: 'brush', label: 'Pinceau', icon: 'Brush', key: 'P', soon: true },
   { id: 'path', label: 'Tracé', icon: 'Spline', key: 'C' },
-  { id: 'panel', label: 'Texte et carte', icon: 'Type', key: 'X' },
-  { id: 'heightmap', label: 'Relief', icon: 'Waves', key: 'H' },
+  { id: 'panel', label: 'Texte et carte', icon: 'Type', key: 'X', soon: true },
+  { id: 'heightmap', label: 'Relief', icon: 'Waves', key: 'H', soon: true },
   { id: 'measure', label: 'Mesure', icon: 'Ruler', key: 'M' },
-  { id: 'library', label: 'Bibliothèque', icon: 'Library', key: 'L' },
+  { id: 'library', label: 'Bibliothèque', icon: 'Library', key: 'L', soon: true },
 ];
 
 /**
@@ -41,19 +42,43 @@ export const TOOL_OPS = {
   select: ['copy', 'paste'],
 };
 
+/**
+ * Ce que dit l'inspecteur d'un outil qui n'a PAS d'opérations du moteur.
+ *
+ * Sans ça il gardait à l'écran la description, les champs et le bouton de
+ * l'opération d'avant : choisir « Texte et carte » proposait « Appliquer
+ * copier ». Un outil doit dire ce qu'il fait, ou dire qu'il ne le fait pas
+ * encore — jamais présenter les commandes d'un autre.
+ */
+export const TOOL_NOTES = {
+  brush: { soon: true, text: 'Peindre directement dans la vue, sans passer par une sélection. Phase 3.' },
+  panel: { soon: true, text: 'Écrire un texte ou projeter une image en blocs sur un mur plat. Le moteur sait déjà le faire (`applyPanel`) ; l’écran de saisie reste à brancher.' },
+  heightmap: { soon: true, text: 'Sculpter le relief depuis une image en niveaux de gris, et ressortir celui d’une zone. Le moteur sait déjà le faire (`applyHeightmap`) ; l’écran reste à brancher.' },
+  measure: { text: 'Les dimensions de la sélection sont au-dessus : taille en blocs et volume. Rien à appliquer.' },
+  library: { soon: true, text: 'Ranger une zone copiée et la reposer ailleurs, d’un build à l’autre. Le moteur et le pont sont prêts ; l’écran reste à brancher.' },
+};
+
 export const useApp = create((set, get) => ({
   projects: [],
   activeId: null,
   geometry: null,
   selection: null,
   tool: 'select',
-  operation: 'set',
+  // La première opération de l'outil de départ, et pas une constante à part :
+  // les deux ont divergé dès que `select` a eu des opérations, et l'inspecteur
+  // affichait « Copier » dans sa liste tout en préparant un « Remplir ».
+  operation: TOOL_OPS.select[0],
   block: 'minecraft:stone',
   layerY: null,
   busy: null,          // { operation, phase, pct }
   stats: {},
   wheelOpen: false,
   paletteQuery: '',
+  /** Onglet de la palette : `build` (ce qui est posé) ou `catalogue` (tout). */
+  paletteTab: 'build',
+  /** Catalogue de blocs du moteur — chargé une fois, au démarrage. */
+  catalog: null,
+  catalogGroups: [],
   toast: null,
   /** Carte d'une save en attente de choix de zone (voir WorldPicker). */
   pendingWorld: null,
@@ -83,6 +108,7 @@ export const useApp = create((set, get) => ({
   setWheel: (wheelOpen) => set({ wheelOpen }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setPaletteQuery: (paletteQuery) => set({ paletteQuery }),
+  setPaletteTab: (paletteTab) => set({ paletteTab }),
   say: (toast) => {
     set({ toast });
     if (toast) setTimeout(() => { if (get().toast === toast) set({ toast: null }); }, 4000);
@@ -115,6 +141,21 @@ export const useApp = create((set, get) => ({
    * que ce soit d'autre : appliquer après, c'est afficher un instant l'ancienne
    * apparence puis la voir sauter.
    */
+  /**
+   * Charge le catalogue de blocs. Une fois par session : c'est une constante
+   * du moteur plus le `blocks.json` de l'installation, rien qui change en cours
+   * de route.
+   */
+  async loadCatalog() {
+    try {
+      const { groups, blocks } = await api().engine.listBlocks();
+      // Avant de poser le catalogue : le viewport lit les couleurs au maillage,
+      // et un build déjà affiché ne se redessine pas tout seul.
+      registerColors(blocks);
+      set({ catalog: blocks, catalogGroups: groups });
+    } catch { /* moteur pas encore prêt : la palette se contente du build */ }
+  },
+
   async loadSettings() {
     let settings = DEFAULT_SETTINGS;
     try {

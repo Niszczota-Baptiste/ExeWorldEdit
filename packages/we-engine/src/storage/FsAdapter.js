@@ -21,6 +21,7 @@ import { StorageAdapter } from './StorageAdapter.js';
 //   │     ├─ preview.json.gz       aperçu 3D dérivé
 //   │     └─ audit.jsonl           journal, une ligne JSON par opération
 //   ├─ settings.json               réglages de l'application
+//   ├─ blocks.json                 blocs custom déclarés (optionnel)
 //   └─ library/
 //      ├─ <scope>.json             index des schematics
 //      └─ blobs/<uuid>.we.gz
@@ -182,6 +183,19 @@ export class FsAdapter extends StorageAdapter {
     fs.mkdirSync(this.root, { recursive: true });
     writeJson(this._settingsFile, next);
     return next;
+  }
+
+  // ── Blocs supplémentaires déclarés par l'installation ─────────────────────
+
+  get _blocksFile() { return path.join(this.root, 'blocks.json'); }
+
+  /**
+   * `blocks.json` à la racine des données. Absent le plus souvent — c'est le
+   * cas NORMAL, pas une erreur : on rend `[]` et le catalogue se contente de
+   * ses blocs vanilla plus ce qu'il découvre dans les builds ouverts.
+   */
+  readBlockExtras() {
+    return readJson(this._blocksFile, []) || [];
   }
 
   // ── Journal d'audit ───────────────────────────────────────────────────────

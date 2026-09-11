@@ -32,7 +32,11 @@ export default function ToolRail() {
                   <button
                     className="tool"
                     data-active={tool === t.id}
-                    disabled={t.soon}
+                    // PAS `disabled` : un bouton mort n'explique rien. L'outil
+                    // s'ouvre, et l'inspecteur dit ce qu'il fera et ce qui
+                    // manque encore. Il reste hors de la roue radiale, qui est
+                    // un geste rapide et n'a rien à proposer d'inutilisable.
+                    data-soon={t.soon || undefined}
                     aria-label={t.label}
                     aria-pressed={tool === t.id}
                     onClick={() => setTool(t.id)}

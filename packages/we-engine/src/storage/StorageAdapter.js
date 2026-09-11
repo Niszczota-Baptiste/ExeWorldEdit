@@ -120,6 +120,18 @@ export class StorageAdapter {
   // eslint-disable-next-line no-unused-vars
   writeSettings(patch) { return notImplemented('writeSettings'); }
 
+  /**
+   * Blocs SUPPLÉMENTAIRES déclarés par l'installation — typiquement les
+   * `minefield:*` du serveur, que ce dépôt ne peut pas connaître. Rendus tels
+   * quels : c'est `normalizeExtras` (worldedit/blockCatalog.js) qui valide.
+   *
+   * Passe par l'adapter et non par un `import` : la liste dépend de l'endroit
+   * où vivent les données, et le renderer n'a pas accès au disque.
+   *
+   * @returns {object|Array} contenu brut, `[]` si rien n'est déclaré.
+   */
+  readBlockExtras() { return notImplemented('readBlockExtras'); }
+
   // ── Bibliothèque de schematics ────────────────────────────────────────────
   //
   // `scope` isole les bibliothèques les unes des autres : un workspace côté

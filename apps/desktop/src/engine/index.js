@@ -11,6 +11,7 @@ import {
   worldOverview, regionsForBBox, regionBounds, selectRegions, readRegions, REGION_SPAN,
 } from '@titi/we-engine/world';
 import { schematicToSponge, schematicToLitematic } from '@titi/we-engine/worldedit';
+import { CATALOG, GROUPS, normalizeExtras } from '@titi/we-engine/blocks';
 
 // LE MOTEUR — tourne dans un `utilityProcess`, jamais dans le renderer.
 //
@@ -370,6 +371,19 @@ const methods = {
     // démarrage ferait croire que le réglage n'a pas marché.
     if (patch && patch.limits) next.limits = staging.setLimits(patch.limits);
     return { ...next, limits: { ...staging.limits } };
+  },
+
+  /**
+   * Catalogue de blocs : vanilla + `minefield:*` déclarés dans `blocks.json`.
+   *
+   * Il passe par le MOTEUR et non par un import direct du renderer, parce que
+   * les blocs déclarés dépendent d'où vivent les données — c'est justement ce
+   * que le `StorageAdapter` sait et que le renderer ne doit pas savoir.
+   */
+  listBlocks: () => {
+    const extras = normalizeExtras(adapter.readBlockExtras());
+    const connus = new Set(CATALOG.map((b) => b.id));
+    return { groups: GROUPS, blocks: [...CATALOG, ...extras.filter((b) => !connus.has(b.id))] };
   },
 
   // ── Diagnostic ────────────────────────────────────────────────────────────

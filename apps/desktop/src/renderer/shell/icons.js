@@ -14,7 +14,7 @@ export {
   FolderOpen, FolderTree,
   // Actions
   Play, Undo2, Redo2, FileDown, Globe, AlertTriangle, RotateCcw, ChevronDown,
-  Plus, Copy, ClipboardPaste,
+  Plus,
   // Barre d'état
   Gauge, Boxes, Crosshair, MemoryStick, History, ArrowRight,
 } from 'lucide-react';

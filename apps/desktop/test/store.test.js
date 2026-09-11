@@ -77,3 +77,54 @@ test('la table ne garde pas de phrase pour un code disparu', async () => {
   const mortes = Object.keys(ERREURS).filter((c) => !rendus.has(c) && !tout.includes(`'${c}'`));
   assert.deepEqual(mortes, [], 'phrases pour des codes que le moteur ne lève plus');
 });
+
+test('l’opération de départ appartient à l’outil de départ', async () => {
+  // Sinon la liste de l'inspecteur affiche son premier élément pendant que les
+  // champs, la description et le bouton en décrivent un autre — et c'est ce
+  // dernier qui part au moteur. Vu à la capture : « Copier » dans la liste,
+  // « Appliquer remplir » sur le bouton.
+  const { useApp } = await import('../src/renderer/store.js');
+  const { tool, operation } = useApp.getState();
+  const ops = TOOL_OPS[tool] || [];
+  assert.ok(ops.includes(operation), `outil « ${tool} » : l’opération de départ « ${operation} » n’est pas dans sa liste`);
+});
+
+test('changer d’outil change d’opération pour une des siennes', async () => {
+  const { useApp } = await import('../src/renderer/store.js');
+  for (const tool of Object.keys(TOOL_OPS)) {
+    useApp.getState().setTool(tool);
+    const { operation } = useApp.getState();
+    assert.ok(TOOL_OPS[tool].includes(operation), `${tool} → ${operation}`);
+  }
+});
+
+test('un outil sans opérations a une note qui dit ce qu’il fait', async () => {
+  const { TOOL_NOTES } = await import('../src/renderer/store.js');
+  for (const t of TOOLS) {
+    if (TOOL_OPS[t.id]?.length) continue;
+    assert.ok(TOOL_NOTES[t.id]?.text, `${t.id} : ni opérations ni explication — l’inspecteur resterait muet`);
+  }
+});
+
+test('le rail marque « bientôt » exactement les outils que l’inspecteur dit à venir', async () => {
+  // Deux affichages de la même vérité : le rail grise le bouton, l'inspecteur
+  // met « À venir ». Qu'ils divergent, et l'utilisateur clique sur un outil
+  // annoncé prêt pour lire qu'il ne l'est pas.
+  const { TOOL_NOTES } = await import('../src/renderer/store.js');
+  for (const t of TOOLS) {
+    assert.equal(!!t.soon, !!TOOL_NOTES[t.id]?.soon, `${t.id} : le rail et l’inspecteur ne disent pas la même chose`);
+  }
+});
+
+test('les raccourcis d’outil sont uniques et réellement écoutés', async () => {
+  // Le rail affiche ces lettres dans ses infobulles. Elles n'étaient liées à
+  // rien : l'application annonçait onze raccourcis dont aucun ne marchait.
+  const vus = new Map();
+  for (const t of TOOLS) {
+    assert.match(t.key, /^[A-Z]$/, `${t.id} : raccourci « ${t.key} » douteux`);
+    assert.equal(vus.has(t.key), false, `raccourci « ${t.key} » partagé par ${vus.get(t.key)} et ${t.id}`);
+    vus.set(t.key, t.id);
+  }
+  const app = await readFile(new URL('../src/renderer/App.jsx', import.meta.url), 'utf8');
+  assert.match(app, /TOOLS\.find\(/, 'App.jsx doit dériver les raccourcis de TOOLS, pas les recopier');
+});

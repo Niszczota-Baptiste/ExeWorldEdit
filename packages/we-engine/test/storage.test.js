@@ -248,6 +248,28 @@ test('FsAdapter — un settings.json corrompu ne fait pas tomber l’application
   assert.deepEqual(a.writeSettings({ theme: 'clair' }), { theme: 'clair' });
 });
 
+// ── Blocs supplémentaires déclarés par l'installation ───────────────────────
+
+test('FsAdapter — pas de blocks.json rend une liste vide, pas null', () => {
+  // Le cas NORMAL : la plupart des installations n'en déclarent aucun.
+  assert.deepEqual(tmpAdapter().readBlockExtras(), []);
+});
+
+test('FsAdapter — blocks.json est rendu tel quel, la validation est ailleurs', () => {
+  const a = tmpAdapter();
+  fs.writeFileSync(path.join(a.root, 'blocks.json'), JSON.stringify({
+    blocks: [{ id: 'minefield:muraille', group: 'minefield' }, 'minefield:arene'],
+  }));
+  const brut = a.readBlockExtras();
+  assert.equal(brut.blocks.length, 2, 'l’adapter ne filtre rien : c’est normalizeExtras qui trie');
+});
+
+test('FsAdapter — un blocks.json corrompu ne fait pas tomber l’application', () => {
+  const a = tmpAdapter();
+  fs.writeFileSync(path.join(a.root, 'blocks.json'), '{ pas du json');
+  assert.deepEqual(a.readBlockExtras(), []);
+});
+
 test('FsAdapter — le journal conserve le relevé par phase', () => {
   const a = tmpAdapter();
   a.saveProject({ id: 'p1', name: 'x' });

@@ -274,6 +274,38 @@ app.whenReady().then(async () => {
           win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(w * 0.36), y: Math.round(h * 0.34) });
           await new Promise((r) => setTimeout(r, 400));
         }
+        // Un outil, par sa LETTRE — celle que le rail affiche dans son
+        // infobulle. Passer par le vrai raccourci plutôt que par un crochet de
+        // test garantit que la capture montre un état atteignable : si la
+        // touche n'est liée à rien, l'image le dit.
+        if (process.env.TITI_SCREENSHOT_TOOL) {
+          win.webContents.sendInputEvent({ type: 'keyDown', keyCode: process.env.TITI_SCREENSHOT_TOOL });
+          win.webContents.sendInputEvent({ type: 'char', keyCode: process.env.TITI_SCREENSHOT_TOOL });
+          win.webContents.sendInputEvent({ type: 'keyUp', keyCode: process.env.TITI_SCREENSHOT_TOOL });
+          await new Promise((r) => setTimeout(r, 500));
+        }
+        // Une opération, par la liste déroulante de l'inspecteur. Pas de
+        // raccourci pour ça : on pose la valeur sur le vrai `<select>` et on
+        // déclenche un vrai `change`, donc le chemin React est le même qu'au
+        // clic. Ce qui suit ne vit que dans la branche de capture.
+        if (process.env.TITI_SCREENSHOT_OP) {
+          await win.webContents.executeJavaScript(`(() => {
+            const el = document.getElementById('op');
+            if (!el) return 'pas de liste d’opérations';
+            el.value = ${JSON.stringify(process.env.TITI_SCREENSHOT_OP)};
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return el.value;
+          })()`);
+          await new Promise((r) => setTimeout(r, 500));
+        }
+        // Un bouton de l'interface, par son sélecteur — `.click()` sur le vrai
+        // élément, donc le même chemin qu'un clic de souris.
+        if (process.env.TITI_SCREENSHOT_CLICK) {
+          await win.webContents.executeJavaScript(
+            `document.querySelector(${JSON.stringify(process.env.TITI_SCREENSHOT_CLICK)})?.click() ?? null`,
+          );
+          await new Promise((r) => setTimeout(r, 600));
+        }
         // Même principe pour les réglages : Ctrl + virgule, le raccourci réel.
         if (process.env.TITI_SCREENSHOT_SETTINGS) {
           win.webContents.sendInputEvent({ type: 'keyDown', keyCode: ',', modifiers: ['control'] });

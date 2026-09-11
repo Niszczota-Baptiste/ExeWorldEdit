@@ -145,6 +145,11 @@
   cursor: default;
   transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
 }
+/* Outil dont l'écran manque encore : visible et cliquable — l'inspecteur
+   explique —, mais visiblement en retrait. */
+.tool[data-soon] { opacity: 0.45; }
+.tool[data-soon]:hover { opacity: 0.8; }
+
 .tool:hover { background: var(--panel-raised); color: var(--text); }
 .tool[data-active='true'] { background: var(--accent-wash); color: var(--accent); }
 .tool[data-active='true']::before {
@@ -290,6 +295,24 @@
 .btn[data-variant='primary']:hover { background: var(--accent-hot); border-color: var(--accent-hot); }
 .btn[disabled] { opacity: 0.4; }
 .btn-wide { width: 100%; }
+/* Carré, juste la place de l'icône : dans une ligne « bloc + poids + retirer »
+   un bouton à la largeur par défaut mangeait le champ du bloc, qui se lisait
+   « minecraft:st… ». */
+.btn-icon { width: var(--ctl-h); padding: 0; flex: none; }
+
+/* L'ACTION reste visible quoi qu'il arrive.
+   Le formulaire d'une opération grandit avec ses paramètres : « Mélange »
+   pousse ses lignes de blocs, et « Appliquer » passait sous la ligne de
+   flottaison du panneau. Un bouton principal qu'il faut aller chercher en
+   défilant n'est pas un bouton principal. */
+.panel-actions {
+  position: sticky;
+  bottom: -14px;
+  margin: 4px -12px -14px;
+  padding: 10px 12px 14px;
+  background: linear-gradient(to bottom, transparent, var(--panel) 14px);
+  border-top: 1px solid var(--line-soft);
+}
 
 .hint {
   margin: 8px 0 0;
@@ -299,6 +322,22 @@
 }
 
 /* ── Palette de blocs ─────────────────────────────────────────────────────── */
+
+/* Onglets de la palette : ce qui est POSÉ vs ce qu'on PEUT poser. */
+.palette-tabs { display: flex; flex: none; border-bottom: 1px solid var(--line-soft); }
+.palette-tab {
+  flex: 1;
+  padding: 7px 8px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: var(--t-micro);
+  cursor: pointer;
+}
+.palette-tab:hover { color: var(--text); }
+.palette-tab[data-active='true'] { color: var(--accent); border-bottom-color: var(--accent); }
 
 .palette-search { padding: 8px 12px; border-bottom: 1px solid var(--line-soft); flex: none; }
 .palette-list { flex: 1; min-height: 0; overflow-y: auto; }
@@ -326,7 +365,15 @@
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
 .block-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.block-count { color: var(--text-faint); font-size: var(--t-micro); }
+.block-count {
+  color: var(--text-faint);
+  font-size: var(--t-micro);
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ── Barre d'état ─────────────────────────────────────────────────────────── */
 

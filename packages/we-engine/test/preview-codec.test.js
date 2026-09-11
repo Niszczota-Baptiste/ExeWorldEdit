@@ -121,10 +121,22 @@ test('l’encodage est plus rapide que JSON sur un gros aperçu', () => {
     blocks, count: n, truncated: false, bom: [], min: { x: 0, y: 0, z: 0 }, size,
   };
 
-  const t0 = Date.now(); const buf = encodePreview(p); const encMs = Date.now() - t0;
-  const t1 = Date.now(); const back = decodePreview(buf); const decMs = Date.now() - t1;
-  const t2 = Date.now(); JSON.parse(JSON.stringify(p)); const jsonMs = Date.now() - t2;
+  assert.deepEqual(decodePreview(encodePreview(p)).blocks, p.blocks, 'exactitude d’abord');
 
-  assert.deepEqual(back.blocks, p.blocks, 'exactitude d’abord');
-  assert.ok(encMs + decMs < jsonMs, `binaire ${encMs + decMs} ms contre JSON seul ${jsonMs} ms`);
+  // MEILLEUR de plusieurs passages, et pas un chronométrage unique : une seule
+  // mesure attrape le premier passage à froid et le bruit de l'ordonnanceur.
+  // Mesuré ainsi, le rapport est stable à 4× ; à une mesure il est tombé
+  // au-dessous de 1 et ce test a échoué sur du code intact — le piège que le
+  // bench de la phase 1.1 documente déjà (« un seuil qui crie au loup »).
+  const meilleur = (f, r = 7) => {
+    let m = Infinity;
+    for (let i = 0; i < r; i++) { const t = Date.now(); f(); m = Math.min(m, Date.now() - t); }
+    return m;
+  };
+  const binaire = meilleur(() => decodePreview(encodePreview(p)));
+  const json = meilleur(() => JSON.parse(JSON.stringify(p)));
+
+  // Marge franche sous le rapport réel : ce seuil ne se déclenche que sur une
+  // vraie régression, pas sur une machine chargée.
+  assert.ok(json >= binaire * 2, `aller-retour binaire ${binaire} ms contre JSON ${json} ms — le format n’a plus de raison d’être`);
 });

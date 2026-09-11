@@ -1063,6 +1063,181 @@ ouvert, sur un jeu qui exerce les trois.
 
 ---
 
+## Le maillon du milieu manquait
+
+Le descripteur d'opérations du moteur génère l'interface, `normalizeParams`
+valide et met en forme ce que l'utilisateur a saisi, l'opération exécute. Trois
+maillons, documentés comme tels. L'application appelait le premier et le
+troisième.
+
+`normalizeParams` n'était invoqué **nulle part** hors de ses propres tests.
+
+### Ce que ça cassait
+
+Un balayage qui exécute chaque opération avec les paramètres que l'inspecteur
+envoie vraiment — pas un jeu écrit pour le test — l'a montré en une exécution :
+
+```
+✗ naturalize preset=custom     s.includes is not a function
+✗ terrain palette=custom       s.includes is not a function
+```
+
+L'inspecteur envoie `{ name: 'minecraft:sand' }` pour un champ `block` ;
+l'opération attend `'minecraft:sand'`. Le normaliseur faisait la conversion —
+personne ne l'appelait. Choisir « Personnalisé » dans l'un de ces deux menus
+plantait l'opération.
+
+Le même balayage a révélé que trois types de paramètres déclarés par le moteur
+n'avaient **aucun champ** dans l'inspecteur :
+
+| Type | Opération | Ce qui arrivait |
+|---|---|---|
+| `blocklist` | **Remplacer** | une case de texte ; la chaîne partait vers une opération qui attend un tableau |
+| `pattern` | **Mélange (%)** | idem, avec des poids |
+| `mask` | Remplir, Mélange | le masque n'était jamais transmis |
+
+« Remplacer » et « Mélange » sont deux des commandes les plus utilisées de
+WorldEdit. Aucune des deux ne pouvait fonctionner, et rien ne s'affichait à
+l'écran pour le dire.
+
+Enfin, trois opérations complètes — `biome`, `copy`, `paste` — étaient
+déclarées, branchées, testées côté moteur, et proposées par **aucun outil**. Le
+rail affichait par ailleurs une lettre de raccourci par outil (`V`, `T`, `B`…)
+depuis toujours : rien ne les écoutait.
+
+### Le remède, et son prix
+
+Le normaliseur est maintenant sur le chemin de **toute** opération, dans
+`applyOperation` — donc du côté du moteur, qui connaît la forme de ses propres
+paramètres, et non du côté de l'hôte, qui peut l'oublier.
+
+Pour ça il fallait qu'il soit **idempotent** : il peut désormais voir des
+paramètres déjà normalisés (un appelant qui normalise, un rejeu depuis le
+journal, un futur hôte). Il ne l'était pas, et deux corrections l'ont rendu tel :
+
+- `amplitude` de `terrain` était convertie en rapport 0..1 par le normaliseur.
+  Renormalisée, 70 % devenait 1 %. Elle reste un **pourcentage** de bout en
+  bout, comme son étiquette l'annonce, et la conversion est passée dans
+  l'opération.
+- `normBlock` accepte une chaîne nue : `naturalize` et `terrain` personnalisés
+  rendent leurs blocs en chaînes, et un second passage les remettait à `null`.
+
+La première correction en a découvert une autre. `opTerrain` faisait
+`Math.min(1, params.amplitude)`. Un serrage est un endroit où une unité fausse
+devient invisible : `make-demo` et le bench demandaient 70 % et 95 %, et
+recevaient 100 %. Ils demandaient aussi des styles de relief en anglais
+(`hills`, `mountain`) à une table dont les clés sont françaises — repli
+silencieux sur `collines`. La démo annonçait un massif rocheux et générait des
+collines.
+
+### Quatre garde-fous, tous vérifiés en échec avant correction
+
+1. **Le balayage** (`test/operations-sweep.test.js`) lance chaque opération
+   déclarée avec les paramètres de l'interface, puis chaque valeur de chaque
+   menu déroulant — un préréglage est une branche de code, et « Personnalisé »
+   plantait quand « Plaine » passait.
+2. **L'idempotence** du normaliseur, opération par opération, plus la garantie
+   qu'aucun paramètre déclaré n'est jeté en route.
+3. **L'atteignabilité** : toute opération du moteur doit figurer dans un
+   `TOOL_OPS`, et tout type de paramètre doit avoir un champ.
+4. **Les messages** : un test relit les `new Error('…')` des deux moteurs et
+   exige une phrase française pour chacun — et refuse aussi une phrase gardée
+   pour un code qui n'existe plus.
+
+---
+
+## Le catalogue de blocs
+
+La palette ne listait que les blocs **présents** dans le build ouvert. Pratique
+pour reprendre un build qu'on n'a pas fait, inutile pour en commencer un : il
+fallait connaître l'identifiant par cœur et le taper.
+
+Elle a maintenant deux onglets — « Dans le build » (avec les décomptes) et
+« Catalogue » — et le catalogue vient de trois sources, dans cet ordre de
+confiance :
+
+1. **`VANILLA`** (`worldedit/blockCatalog.js`) : 346 entrées, la palette de
+   construction de Minecraft 1.18 rangée en dix-huit familles. Volontairement
+   pas les mille blocs du jeu : ce qu'on pose en masse dans une muraille, une
+   arène ou une ville.
+2. **`blocks.json`**, à la racine du dossier de données, lu par le
+   `StorageAdapter` (`readBlockExtras`). C'est là que se déclarent les blocs
+   `minefield:*` du serveur, avec leur famille et, si on veut, leur couleur
+   d'aperçu. Coller la liste du serveur suffit — rien à recompiler.
+3. **Ce qu'on croise** : tout bloc inconnu vu dans un build ouvert entre au
+   catalogue tout seul (`mergeDiscovered`).
+
+La source 2 existe parce que la 1 ne peut pas être exhaustive depuis ce dépôt :
+les blocs `minefield:*` sont définis par le serveur. Seuls ceux réellement
+attestés dans le code y figurent. **Inventer des identifiants plausibles serait
+pire que d'en avoir peu** — l'invariant n° 3 veut qu'un `minefield:*` ne soit
+jamais remappé vanilla, donc un identifiant faux s'écrirait tel quel dans le
+monde et n'y rendrait rien.
+
+```json
+{
+  "blocks": [
+    { "id": "minefield:muraille", "group": "minefield", "color": [122, 118, 110] },
+    "minefield:arene"
+  ]
+}
+```
+
+Ce qui est mal formé est **refusé**, pas assaini — même raisonnement que pour
+les identifiants de projet.
+
+La recherche comprend le français : `pierre` trouve `stone`, `escalier bouleau`
+trouve `birch_stairs` dans l'ordre qu'on veut, et les accents ne bloquent pas.
+Sans alias, la palette ne répondait rien à la moitié des recherches qu'on lui
+fait.
+
+![Le catalogue de blocs et « Remplacer »](images/catalogue-blocs.png)
+
+*À droite, le catalogue et ses familles ; à gauche dans le panneau,
+« Remplacer » avec sa liste de blocs source — le champ qui n'existait pas.*
+
+![Le mélange pondéré](images/melange-pondere.png)
+
+*« Mélange (%) » : une ligne par bloc, les parts en pourcentage sous la liste, et
+le bouton d'application épinglé en bas du panneau.*
+
+---
+
+## Ce que les captures ont montré
+
+Trois défauts d'interface que seul un vrai lancement révèle, trouvés en
+regardant les images rendues après coup.
+
+**Une opération qui n'appartenait pas à l'outil affiché.** L'état de départ
+était `tool: 'select'` et `operation: 'set'`, deux constantes indépendantes.
+Tant que l'outil de sélection n'avait aucune opération, la liste était cachée et
+l'incohérence ne se voyait pas. En lui donnant le presse-papier, la capture a
+montré « Copier » dans la liste, « Remplit la sélection d'un bloc » en
+description et « Appliquer remplir » sur le bouton — et c'est `set` qui serait
+parti au moteur. L'inspecteur retombe maintenant sur la première opération de
+l'outil, et un test exige que l'état de départ soit cohérent.
+
+**Le bouton principal sous la ligne de flottaison.** Le formulaire d'une
+opération grandit avec ses paramètres : « Mélange » ajoute une ligne par bloc, et
+« Appliquer » sortait de l'écran. Les actions sont épinglées en bas du panneau.
+Un bouton principal qu'il faut aller chercher en défilant n'en est pas un.
+
+**Un outil qui montre les commandes d'un autre.** « Texte et carte »,
+« Relief » et « Bibliothèque » n'ont pas d'opérations du moteur — leur écran
+reste à écrire. L'inspecteur gardait alors la description, les champs et le
+bouton de l'opération précédente : choisir « Texte et carte » proposait
+« Appliquer copier ». Chacun dit maintenant ce qu'il fera et ce qui manque
+(`TOOL_NOTES`), et le rail les marque comme le fait l'inspecteur — un test
+compare les deux, parce que deux affichages de la même vérité finissent par
+diverger.
+
+Pour que ces vérifications soient reproductibles, le mode capture accepte
+`TITI_SCREENSHOT_TOOL` (une lettre de raccourci, la vraie) et
+`TITI_SCREENSHOT_OP` / `TITI_SCREENSHOT_CLICK` (le vrai `<select>`, le vrai
+bouton). Ce qu'on capture reste un état atteignable à la main.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
@@ -1245,10 +1420,18 @@ npm run demo     --workspace @titi/desktop -- <dossier-de-données>
 TITI_SCREENSHOT=/chemin/capture.png xvfb-run -a npx electron .
 ```
 
-`TITI_SCREENSHOT_WHEEL=1` et `TITI_SCREENSHOT_SETTINGS=1` ouvrent la roue
-d'outils ou les réglages avant la capture, par un **vrai** événement clavier
-(`Espace`, `Ctrl` `,`) et non par un crochet de test : ce qu'on capture est alors
-exactement ce que produit la touche, pas un état forcé qui pourrait mentir.
+Cinq variables préparent l'état avant la prise, toutes par le **vrai** chemin de
+l'interface et non par un crochet de test — ce qu'on capture est donc un état
+atteignable à la main, pas un état forcé qui pourrait mentir :
+
+| Variable | Effet | Chemin emprunté |
+|---|---|---|
+| `TITI_SCREENSHOT_WHEEL=1` | ouvre la roue d'outils | touche `Espace` |
+| `TITI_SCREENSHOT_SETTINGS=1` | ouvre les réglages | `Ctrl` `,` |
+| `TITI_SCREENSHOT_TOOL=B` | choisit un outil | sa lettre de raccourci |
+| `TITI_SCREENSHOT_OP=mix` | choisit une opération | le vrai `<select>`, vrai `change` |
+| `TITI_SCREENSHOT_CLICK=<sélecteur>` | clique un élément | `.click()` sur le vrai bouton |
+
 `TITI_SCREENSHOT_DELAY` règle l'attente avant la prise (9 000 ms par défaut).
 
 `TITI_DATA_ROOT` déplace l'espace de données (par défaut
@@ -1266,6 +1449,7 @@ jetable sans toucher au vrai.
 | 2.2 | Ouverture et export | **fait** — `.mca`, `.zip`, dossier de save, dossier `region/`, `.schem`, `.litematic`, glisser-déposer ; export `.mca`/`.schem`/`.litematic` ; « Appliquer au monde » avec verrou `session.lock` et sauvegarde horodatée. Reste : récupération après crash explicite (le staging est déjà persistant) |
 | 2.3 | Direction visuelle (jetons, Pretendard, roue d'outils) | **fait** |
 | 2.4 | Disposition (panneaux, inspecteur généré, palette virtualisée) | fait pour l'essentiel ; `Ctrl+K` et thème clair à venir |
+| 2.4c | Commandes complètes et catalogue de blocs | **fait** — les 29 opérations atteignables, champs `blocklist`/`pattern`/`mask`, presse-papier et biome branchés, raccourcis d'outil, catalogue de 346 blocs + `blocks.json` pour les `minefield:*`. Reste : les écrans « Texte et carte », « Relief » et « Bibliothèque », dont le moteur est prêt |
 | 2.4b | Réglages (texte, densité, accent) + mode performance | **fait** — `settings.json` via l'adapter, `theme.js` testé, relevé par phase |
 | 2.5 | Viewport | maillage par chunk + AO **fait** ; atlas de textures et modèles non cubiques à venir |
 | 2.6 | Empaquetage | **fait** — installeur NSIS et portable construits sur Windows, paquet Linux construit et lancé. Reste : signature de code (certificat à acheter) |

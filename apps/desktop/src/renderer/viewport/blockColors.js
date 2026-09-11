@@ -85,6 +85,22 @@ function table() {
   return base;
 }
 
+/**
+ * Couleurs DÉCLARÉES par l'installation (`blocks.json`), posées au chargement
+ * du catalogue. Elles priment sur tout : qui déclare un bloc custom sait mieux
+ * que nous de quelle couleur il est.
+ */
+export function registerColors(blocks) {
+  let n = 0;
+  for (const b of blocks || []) {
+    if (!b?.color) continue;
+    table().set(b.id, b.color);
+    cache.delete(b.id);
+    n++;
+  }
+  return n;
+}
+
 /** @returns {[number, number, number]} */
 export function blockColor(name) {
   let c = cache.get(name);

@@ -11,7 +11,7 @@ import WorldPicker from './shell/WorldPicker.jsx';
 import Settings from './shell/Settings.jsx';
 import PerfPanel from './shell/PerfPanel.jsx';
 import Viewport from './viewport/Viewport.jsx';
-import { useApp } from './store.js';
+import { useApp, TOOLS } from './store.js';
 
 export default function App() {
   const geometry = useApp((s) => s.geometry);
@@ -27,14 +27,17 @@ export default function App() {
   const openPath = useApp((s) => s.openPath);
   const openWorld = useApp((s) => s.openWorld);
   const loadSettings = useApp((s) => s.loadSettings);
+  const loadCatalog = useApp((s) => s.loadCatalog);
   const setSettingsOpen = useApp((s) => s.setSettingsOpen);
   const run = useApp((s) => s.run);
+  const setTool = useApp((s) => s.setTool);
   const [dropping, setDropping] = useState(false);
 
   useEffect(() => { refresh(); }, [refresh]);
   // Le thème AVANT les projets : appliquer les réglages après coup montrerait
   // un instant l'apparence par défaut, puis la verrait sauter.
   useEffect(() => { loadSettings(); }, [loadSettings]);
+  useEffect(() => { loadCatalog(); }, [loadCatalog]);
 
   // Glisser-déposer sur toute la fenêtre. Le renderer ne LIT pas le fichier :
   // il n'en transmet que le chemin, et c'est le processus principal qui décide
@@ -80,10 +83,17 @@ export default function App() {
       // `typing` les laisse au champ de saisie qui a le focus.
       if ((e.ctrlKey || e.metaKey) && !typing && e.key.toLowerCase() === 'c') { e.preventDefault(); run('copy', {}); }
       if ((e.ctrlKey || e.metaKey) && !typing && e.key.toLowerCase() === 'v') { e.preventDefault(); run('paste', { mode: 'overlay' }); }
+      // Raccourcis d'outil. Le rail les AFFICHE depuis toujours dans ses
+      // infobulles ; rien ne les écoutait. Lus depuis `TOOLS` et pas recopiés
+      // ici, pour qu'ajouter un outil suffise.
+      if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const t = TOOLS.find((x) => x.key.toLowerCase() === e.key.toLowerCase());
+        if (t) { e.preventDefault(); setTool(t.id); }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setWheel, undo, redo, open, setSettingsOpen, run]);
+  }, [setWheel, undo, redo, open, setSettingsOpen, run, setTool]);
 
   const minY = geometry?.min.y ?? 0;
   const maxY = geometry ? geometry.min.y + geometry.size.y - 1 : 0;
@@ -155,9 +165,12 @@ export default function App() {
           <Panel defaultSize={24} minSize={16} maxSize={40}>
             <div className="side" style={{ height: '100%' }}>
               <PanelGroup direction="vertical" autoSaveId="titi-side">
-                <Panel defaultSize={58} minSize={20}><Inspector /></Panel>
+                {/* L'inspecteur d'abord : c'est la surface de travail. Une
+                    opération à plusieurs paramètres — « Mélange » et ses lignes
+                    de blocs — y tient sans défiler. */}
+                <Panel defaultSize={66} minSize={20}><Inspector /></Panel>
                 <PanelResizeHandle className="handle" />
-                <Panel defaultSize={42} minSize={18}><BlockPalette /></Panel>
+                <Panel defaultSize={34} minSize={18}><BlockPalette /></Panel>
               </PanelGroup>
             </div>
           </Panel>

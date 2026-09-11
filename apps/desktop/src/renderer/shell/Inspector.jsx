@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Play, Settings2, Undo2, Redo2, FileDown, Globe, AlertTriangle, Plus, Minus } from './icons.js';
 import { OPERATIONS } from '@titi/we-engine/operations';
-import { useApp, TOOL_OPS, TOOLS } from '../store.js';
+import { useApp, TOOL_OPS, TOOLS, TOOL_NOTES } from '../store.js';
 
 // Inspecteur contextuel : les réglages de l'outil courant.
 //
@@ -27,7 +27,12 @@ export default function Inspector() {
   const applyToWorld = useApp((s) => s.applyToWorld);
 
   const ops = TOOL_OPS[tool] || [];
-  const spec = byId.get(operation);
+  // L'opération courante doit appartenir à l'outil courant. Sinon la liste
+  // affiche son premier élément pendant que les champs, la description et le
+  // bouton décrivent une AUTRE opération — et c'est celle-là qui part au
+  // moteur. Retomber sur le premier élément est le seul état cohérent.
+  const active = ops.length && !ops.includes(operation) ? ops[0] : operation;
+  const spec = byId.get(active);
   const [values, setValues] = useState({});
   const toolMeta = TOOLS.find((t) => t.id === tool);
 
@@ -35,7 +40,7 @@ export default function Inspector() {
     if (!spec) return {};
     const out = {};
     for (const p of spec.params || []) {
-      const v = values[`${operation}.${p.name}`] ?? p.default;
+      const v = values[`${active}.${p.name}`] ?? p.default;
       switch (p.type) {
         case 'block': out[p.name] = { name: v || block }; break;
         // Les trois types COMPOSITES. Ils étaient déclarés par le moteur et
@@ -57,10 +62,10 @@ export default function Inspector() {
       }
     }
     return out;
-  }, [spec, values, operation, block]);
+  }, [spec, values, active, block]);
 
-  const set = (name, v) => setValues((s) => ({ ...s, [`${operation}.${name}`]: v }));
-  const get = (p) => values[`${operation}.${p.name}`] ?? p.default ?? '';
+  const set = (name, v) => setValues((s) => ({ ...s, [`${active}.${name}`]: v }));
+  const get = (p) => values[`${active}.${p.name}`] ?? p.default ?? '';
 
   if (!project) {
     return (
@@ -82,47 +87,60 @@ export default function Inspector() {
             flottaison du panneau et devenait introuvable. */}
         <Selection selection={selection} />
 
+        {/* Outil sans opérations : on dit ce qu'il fait, et on s'arrête là. */}
+        {ops.length === 0 && (
+          <p className="hint" style={{ margin: '0 0 12px' }}>
+            {TOOL_NOTES[tool]?.soon && <b style={{ color: 'var(--select)' }}>À venir. </b>}
+            {TOOL_NOTES[tool]?.text || 'Cet outil n’a pas de réglages.'}
+          </p>
+        )}
+
         {ops.length > 0 && (
           <div className="field">
             <label htmlFor="op">Opération</label>
-            <select id="op" className="select" value={operation} onChange={(e) => setOperation(e.target.value)}>
+            <select id="op" className="select" value={active} onChange={(e) => setOperation(e.target.value)}>
               {ops.map((id) => <option key={id} value={id}>{byId.get(id)?.label || id}</option>)}
             </select>
           </div>
         )}
 
-        {spec?.description && <p className="hint" style={{ margin: '0 0 12px' }}>{spec.description}</p>}
+        {ops.length > 0 && spec?.description && <p className="hint" style={{ margin: '0 0 12px' }}>{spec.description}</p>}
 
-        {(spec?.params || []).map((p) => {
+        {ops.length > 0 && (spec?.params || []).map((p) => {
           // `showIf` cache un champ qui n'a pas de sens avec les valeurs
           // actuelles — un champ grisé qu'on ne peut jamais remplir est pire
           // qu'un champ absent.
-          if (p.showIf && !Object.entries(p.showIf).every(([k, v]) => String(get({ name: k, default: byId.get(operation)?.params.find((q) => q.name === k)?.default })) === String(v))) return null;
+          if (p.showIf && !Object.entries(p.showIf).every(([k, v]) => String(get({ name: k, default: spec.params.find((q) => q.name === k)?.default })) === String(v))) return null;
           return <Field key={p.name} p={p} value={get(p)} onChange={(v) => set(p.name, v)} block={block} />;
         })}
 
-        <button
-          className="btn btn-wide"
-          data-variant="primary"
-          disabled={!!busy || !selection || !spec}
-          onClick={() => run(operation, params)}
-          style={{ marginTop: 4 }}
-        >
-          <Play size={13} />
-          {busy ? 'En cours…' : `Appliquer ${spec?.label?.toLowerCase() || ''}`}
-        </button>
-
-        <div className="row" style={{ marginTop: 8 }}>
-          <button className="btn" disabled={!project.undoDepth} onClick={undo}>
-            <Undo2 size={13} /> Annuler
-          </button>
-          <button className="btn" disabled={!project.redoDepth} onClick={redo}>
-            <Redo2 size={13} /> Rétablir
-          </button>
-        </div>
-
-        <Export project={project} onExport={exportBuild} />
+        <Export onExport={exportBuild} />
         <ApplyToWorld project={project} onApply={applyToWorld} />
+
+        {/* Épinglé en bas du panneau : avec « Mélange » et ses lignes de blocs,
+            le bouton principal passait sous la ligne de flottaison et il
+            fallait défiler pour le trouver. */}
+        <div className="panel-actions">
+          {ops.length > 0 && (
+            <button
+              className="btn btn-wide"
+              data-variant="primary"
+              disabled={!!busy || !selection || !spec}
+              onClick={() => run(active, params)}
+            >
+              <Play size={13} />
+              {busy ? 'En cours…' : `Appliquer ${spec?.label?.toLowerCase() || ''}`}
+            </button>
+          )}
+          <div className="row" style={{ marginTop: ops.length > 0 ? 8 : 0 }}>
+            <button className="btn" disabled={!project.undoDepth} onClick={undo}>
+              <Undo2 size={13} /> Annuler
+            </button>
+            <button className="btn" disabled={!project.redoDepth} onClick={redo}>
+              <Redo2 size={13} /> Rétablir
+            </button>
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -132,7 +150,7 @@ export default function Inspector() {
  * Les trois sorties, au même endroit. Le `.mca` sort le build entier ; les deux
  * schematics sortent la SÉLECTION, comme WorldEdit.
  */
-function Export({ project, onExport }) {
+function Export({ onExport }) {
   return (
     <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line-soft)' }}>
       <label style={{ display: 'block', marginBottom: 6, color: 'var(--text-dim)', fontSize: 'var(--t-micro)' }}>
@@ -149,15 +167,12 @@ function Export({ project, onExport }) {
           .litematic
         </button>
       </div>
-      <p className="hint">
-        Le <code>.mca</code> sort le build entier sans perte. Les schematics sortent la sélection ;
-        WorldEdit ne colle leurs entités qu’avec <code>//paste -e</code>.
+      {/* Le détail est dans les infobulles des boutons. Trois lignes de prose
+          ici poussaient les réglages de l'opération hors de l'écran, et c'est
+          la seule chose qu'on regarde vraiment souvent. */}
+      <p className="hint" title="WorldEdit ne colle les entités d’un schematic qu’avec //paste -e">
+        <code>.mca</code> : le build entier, sans perte. Schematics : la sélection.
       </p>
-      {project.world && (
-        <p className="hint" style={{ color: 'var(--text-faint)' }}>
-          Ce projet vient de <b>{project.world.path}</b>.
-        </p>
-      )}
     </div>
   );
 }

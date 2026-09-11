@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (276 tests aujourd'hui : 251 moteur, 25 desktop)
+npm test          # tous les paquets (330 tests aujourd'hui : 294 moteur, 36 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -103,7 +103,10 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Une chose qui dépend d'où vivent les données | une méthode du `StorageAdapter` + son cas dans la suite de contrat (`test/storage.test.js`) |
 | Un plafond réglable | `DEFAULT_LIMITS` + son entrée dans `LIMIT_RANGES` (`src/staging/geometry.js`), jamais une variable d'environnement. L'interface génère son champ depuis les bornes, il n'y a rien à écrire côté renderer |
 | Une capacité pour le renderer | la méthode dans `apps/desktop/src/engine/index.js`, puis son nom dans `ENGINE_METHODS` du preload |
-| Un outil dans l'interface | `TOOLS` et `TOOL_OPS` (`apps/desktop/src/renderer/store.js`) — l'inspecteur génère ses champs depuis le descripteur du moteur, il n'y a pas de formulaire à écrire |
+| Un outil dans l'interface | `TOOLS` et `TOOL_OPS` (`apps/desktop/src/renderer/store.js`) — l'inspecteur génère ses champs depuis le descripteur du moteur, il n'y a pas de formulaire à écrire. Un outil SANS opérations doit avoir sa note dans `TOOL_NOTES`, sinon l'inspecteur reste muet |
+| Un TYPE de paramètre d'opération | son champ dans `Field` (`Inspector.jsx`) ET son cas dans le constructeur de `params` juste au-dessus — un test exige les deux |
+| Un bloc au catalogue | `VANILLA` (`src/worldedit/blockCatalog.js`) pour du vanilla. Pour un `minefield:*` : `blocks.json` du dossier de données, jamais le code — ce dépôt ne connaît pas la liste du serveur |
+| Un code d'erreur | `ERREURS` (`apps/desktop/src/renderer/store.js`), en français et en disant QUOI FAIRE — un test relit les `new Error()` des deux moteurs et refuse un code sans phrase |
 | Une couleur de bloc pour le viewport | `EXTRA` dans `apps/desktop/src/renderer/viewport/blockColors.js` (en attendant l'atlas) |
 | Un réglage de l'application | `DEFAULT_SETTINGS` (`apps/desktop/src/renderer/theme.js`) + son champ dans `Settings.jsx` ; il se persiste tout seul via `readSettings`/`writeSettings` de l'adapter |
 | Une variable de thème ou de densité | `theme.js` ET `tokens.css` — un test compare les deux à l'échelle 1, ne pas n'en changer qu'une |
@@ -114,7 +117,10 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 ## Ce qui n'est pas encore là
 
 Entités mobiles (`entities/*.mca`), aperçu découpé par chunk, `getBlock` sans
-allocation, et toute l'application. Détail, écarts assumés avec le site et ordre
+allocation, les écrans des outils « Texte et carte », « Relief » et
+« Bibliothèque » (le moteur sait déjà les faire), le pinceau, et la liste réelle
+des blocs `minefield:*` — elle appartient au serveur, pas à ce dépôt, et se
+déclare dans `blocks.json`. Détail, écarts assumés avec le site et ordre
 des phases : **`docs/desktop.md`**.
 
 ## Rapport au site `titisite`
@@ -254,6 +260,42 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   allocations par bloc pour une palette de dix. Un index `Map` construit une
   fois par section : × 3,5. Corollaire : les opérations parcourent en YZX, donc
   un mémo d'UNE case sur la section résolue supprime les recherches de chunk.
+- **Un maillon de la chaîne qu'aucun hôte n'appelle.** Le descripteur génère
+  l'interface, `normalizeParams` valide, l'opération exécute. L'application
+  appelait le premier et le troisième : le normaliseur n'était invoqué NULLE
+  PART hors de ses propres tests. « Naturaliser → Personnalisé » plantait sur
+  `s.includes is not a function`, parce que l'inspecteur envoie `{ name }` là où
+  l'opération attend une chaîne. Il est maintenant sur le chemin de toute
+  opération (`applyOperation`), donc plus personne ne peut le sauter — ce qui
+  exigeait qu'il soit IDEMPOTENT (un test le prouve pour chaque opération).
+- **Un type de paramètre déclaré sans champ pour le saisir.** `blocklist`,
+  `pattern` et `mask` retombaient sur la case de texte par défaut, et la chaîne
+  partait telle quelle vers une opération qui attend un tableau : « Remplacer »
+  et « Mélange » ne pouvaient pas fonctionner, sans la moindre erreur à l'écran.
+- **Déclaré, branché, testé — et inatteignable.** `biome`, `copier` et `coller`
+  existaient de bout en bout côté moteur ; aucun outil ne les proposait, aucun
+  raccourci ne les appelait. De même, le rail AFFICHAIT une lettre de raccourci
+  par outil depuis toujours, et rien ne les écoutait. Un test relie maintenant
+  le descripteur du moteur à `TOOL_OPS`.
+- **Un pourcentage serré comme un rapport.** `terrain` recevait `amplitude` en
+  0..1 alors que son étiquette dit « % ». `Math.min(1, 70)` vaut 1 : la démo et
+  le bench demandaient 70 % et 95 % et obtenaient 100 %, sans erreur. Même
+  histoire pour les styles, demandés en anglais (`hills`) à une table dont les
+  clés sont françaises — repli silencieux sur `collines`. Un serrage est un
+  endroit où une unité fausse devient invisible.
+- **Une assertion de performance à une seule mesure.** « le binaire est plus
+  rapide que JSON » a échoué sur du code intact : un premier passage à froid
+  suffit. Au MEILLEUR de sept, le rapport est stable à 4× — même leçon que le
+  bench de la phase 1.1, appliquée aux tests.
+- **Un bouton principal qui descend avec le formulaire.** « Mélange » ajoute une
+  ligne par bloc, et « Appliquer » passait sous la ligne de flottaison du
+  panneau. Les actions sont épinglées en bas (`.panel-actions`) : un bouton
+  principal qu'il faut aller chercher en défilant n'en est pas un.
+- **Une opération qui n'appartient pas à l'outil affiché.** L'état de départ
+  était `tool: 'select'` et `operation: 'set'`, deux constantes indépendantes.
+  Dès que `select` a eu des opérations, la liste affichait « Copier » pendant
+  que les champs et le bouton disaient « Remplir » — et c'est « Remplir » qui
+  serait parti au moteur.
 - **Un normaliseur qui jette ce qu'il ne nomme pas.** `normalizeParams`
   (`worldedit/operations.js`) ne recopie que les paramètres qu'il liste, et le
   cas non personnalisé de `naturalize` faisait `return { preset }`. Ajouter
