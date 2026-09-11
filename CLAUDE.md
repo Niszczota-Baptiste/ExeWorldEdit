@@ -68,13 +68,14 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (354 tests aujourd'hui : 305 moteur, 49 desktop)
+npm test          # tous les paquets (375 tests aujourd'hui : 315 moteur, 60 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
 npm run start --workspace @titi/desktop   # build puis lancement
 npm run dist  --workspace @titi/desktop   # installeur Windows
 npm run demo  --workspace @titi/desktop -- <dossier>   # build de démonstration
+npm run pack  --workspace @titi/desktop -- <dossier>   # pack de ressources de démonstration
 npm run icon  --workspace @titi/desktop   # régénère build/icon.ico
 
 npm run bench --workspace @titi/we-engine                 # médiane de 1
@@ -107,7 +108,8 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Une conversion pixels → grille | `apps/desktop/src/renderer/grid/pixels.js` (pur, testé sans navigateur) ; ce qui touche un canvas va dans `draw.js` |
 | Un outil dans l'interface | `TOOLS` et `TOOL_OPS` (`apps/desktop/src/renderer/store.js`) — l'inspecteur génère ses champs depuis le descripteur du moteur, il n'y a pas de formulaire à écrire. Un outil SANS opérations doit avoir sa note dans `TOOL_NOTES`, sinon l'inspecteur reste muet |
 | Un TYPE de paramètre d'opération | son champ dans `Field` (`Inspector.jsx`) ET son cas dans le constructeur de `params` juste au-dessus — un test exige les deux |
-| Un bloc au catalogue | `VANILLA` (`src/worldedit/blockCatalog.js`) pour du vanilla. Pour un `minefield:*` : `blocks.json` du dossier de données, jamais le code — ce dépôt ne connaît pas la liste du serveur |
+| Un bloc au catalogue | `VANILLA` (`src/worldedit/blockCatalog.js`) pour du vanilla. Pour un `minefield:*` : désigner le PACK du serveur dans les réglages — il déclare ses blocs et ses modèles, donc le catalogue et les icônes se remplissent seuls. `blocks.json` reste pour ce qui n'est dans aucun pack |
+| Un raccourci clavier | `ACTIONS` (`apps/desktop/src/renderer/keys.js`) — les touches d'outil en sont DÉRIVÉES de `TOOLS`, rien à recopier |
 | Un nom qui devient un nom de FICHIER | `safeFileName` (`src/storage/filename.js`) — jamais une expression jetable sur place, et jamais `\w` |
 | Un code d'erreur | `ERREURS` (`apps/desktop/src/renderer/store.js`), en français et en disant QUOI FAIRE — un test relit les `new Error()` des deux moteurs et refuse un code sans phrase |
 | Une couleur de bloc pour le viewport | `EXTRA` dans `apps/desktop/src/renderer/viewport/blockColors.js` (en attendant l'atlas) |
@@ -262,6 +264,30 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   allocations par bloc pour une palette de dix. Un index `Map` construit une
   fois par section : × 3,5. Corollaire : les opérations parcourent en YZX, donc
   un mémo d'UNE case sur la section résolue supprime les recherches de chunk.
+- **Un carré de couleur ne dit pas quel bloc c'est.** Trente nuances de gris se
+  ressemblent toutes. Les vraies textures sont dans le jeu et ne peuvent pas
+  être embarquées : l'application lit le pack qu'on lui désigne et suit la
+  chaîne complète `blockstates → models (parent) → textures`. On ne peut PAS
+  sauter au nom de texture — `grass_block` n'en a aucune qui porte son nom, et
+  surtout un bloc peut n'être pas un cube.
+- **Tous les blocs ne sont pas des cubes.** Une chaise `minefield:*`, un
+  escalier, une dalle, un quart de bloc. Dessiner leur texture sur un cube plein
+  donne une icône qui MENT sur ce qu'on pose. `planIcone` classe
+  (`cube` / `model`) et rend les cuboïdes ; l'icône les dessine un par un, triés
+  en profondeur — sans tri, un pied de chaise passe devant l'assise.
+- **Un modèle déborde du bloc.** Minecraft autorise −16 à 32, et le dossier
+  d'une chaise monte à 20. Cadrer sur 0..16 le rognait. L'icône se cadre sur les
+  bornes RÉELLES des cuboïdes — ce qui fait aussi qu'une dalle remplit son
+  icône au lieu d'être un trait dans un coin.
+- **Deux constantes indépendantes finissent par diverger** — deuxième fois
+  aujourd'hui. Les touches vivaient dans `TOOLS` (les lettres) et dans
+  `App.jsx` (les combinaisons) : rien de réassignable, et rien qui empêchait
+  deux actions de partager une touche. `keys.js` est la seule table, et les
+  touches d'outil sont dérivées de `TOOLS`.
+- **Comparer une touche sans regarder les modificateurs ABSENTS.** « Z » qui
+  répond aussi à Ctrl+Z, donc une annulation qui change d'outil au passage. Une
+  liaison a une forme canonique unique (modificateurs dans un ordre fixe), et la
+  comparaison porte sur elle — pas sur `e.key` seul.
 - **`\w` jette tout ce qui n'est pas de l'ASCII.** La règle de nom de fichier
   était `[^\w.-]+ → _`. « Vallée » devenait `Vall_e`, et « 한국어 건물 » devenait
   `_` — deux builds coréens différents sortaient sous le même nom. Or la police

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Settings2, Gauge, Type, Layers, RotateCcw, Boxes, Ruler, AlertTriangle } from './icons.js';
+import { Settings2, Gauge, Type, Layers, RotateCcw, Boxes, Ruler, AlertTriangle, FolderOpen } from './icons.js';
 import { useApp } from '../store.js';
 import { ACCENTS, RANGES, DEFAULT_SETTINGS } from '../theme.js';
 import { ACTIONS, KEY_GROUPS, DEFAULT_KEYS, describeBinding, bindingFromEvent, keyConflicts } from '../keys.js';
@@ -25,6 +25,9 @@ export default function Settings() {
   const keys = useApp((s) => s.keys);
   const setKey = useApp((s) => s.setKey);
   const resetKeys = useApp((s) => s.resetKeys);
+  const pack = useApp((s) => s.pack);
+  const pickPack = useApp((s) => s.pickResourcePack);
+  const setPack = useApp((s) => s.setResourcePack);
 
   if (!open) return null;
 
@@ -124,6 +127,32 @@ export default function Settings() {
                 <dd className="kv-path" title={info.dataRoot}>{info.dataRoot}</dd>
               </dl>
             )}
+          </Section>
+
+          <Section icon={<Layers size={12} />} title="Icônes de blocs">
+            <p className="hint" style={{ marginTop: 0 }}>
+              Les textures du jeu ne peuvent pas être livrées avec l’application.
+              Désigne un pack de ressources — le <code>.jar</code> d’une version de
+              Minecraft, un pack zippé, ou un dossier déplié — et la palette montre
+              les vraies icônes. Le pack du serveur fournit de la même façon les
+              blocs <code>minefield:*</code>, <b>leur forme comprise</b> : une chaise
+              est dessinée en chaise, pas en cube.
+            </p>
+            <div className="row">
+              <button className="btn" onClick={pickPack}>
+                <FolderOpen size={13} /> Choisir un pack
+              </button>
+              {pack?.path && (
+                <button className="btn" onClick={() => setPack(null)} title="Revenir aux carrés de couleur">
+                  <RotateCcw size={13} /> Retirer
+                </button>
+              )}
+            </div>
+            <p className="hint" style={{ color: pack && !pack.ok ? 'var(--danger)' : undefined }}>
+              {!pack?.path && 'Aucun pack : la palette affiche des carrés de couleur dérivés du nom.'}
+              {pack?.path && pack.ok && <>Chargé : <b className="kv-path">{pack.path}</b>{pack.entries ? ` — ${pack.entries.toLocaleString('fr-FR')} entrées.` : '.'}</>}
+              {pack?.path && !pack.ok && <>Illisible comme pack de ressources : <b className="kv-path">{pack.path}</b> ({pack.reason}).</>}
+            </p>
           </Section>
 
           <Section icon={<Ruler size={12} />} title="Raccourcis clavier">

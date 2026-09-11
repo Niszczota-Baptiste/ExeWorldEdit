@@ -29,6 +29,65 @@ function findEocd(buf) {
   return -1;
 }
 
+/**
+ * INDEX du central directory : nom d'entrée → où la lire. Rien n'est décompressé
+ * ici.
+ *
+ * C'est ce qui rend un pack de ressources utilisable : un `.jar` de Minecraft
+ * pèse une vingtaine de mégaoctets pour plusieurs milliers d'entrées, et on n'en
+ * veut qu'une poignée à la fois — le modèle d'un bloc et ses deux ou trois
+ * textures. Tout déplier pour en lire trois serait absurde.
+ *
+ * @param {Buffer} buf
+ * @returns {Map<string, {method:number, compSize:number, localOff:number}>}
+ */
+export function zipIndex(buf) {
+  const eocd = findEocd(buf);
+  if (eocd < 0) throw new Error('zip_invalid');
+  const total = buf.readUInt16LE(eocd + 10);
+  let ptr = buf.readUInt32LE(eocd + 16);
+  if (ptr === 0xffffffff) throw new Error('zip64_unsupported');
+
+  const index = new Map();
+  for (let n = 0; n < total; n++) {
+    if (ptr + 46 > buf.length || buf.readUInt32LE(ptr) !== CEN_SIG) break;
+    const method = buf.readUInt16LE(ptr + 10);
+    const compSize = buf.readUInt32LE(ptr + 20);
+    const nameLen = buf.readUInt16LE(ptr + 28);
+    const extraLen = buf.readUInt16LE(ptr + 30);
+    const commentLen = buf.readUInt16LE(ptr + 32);
+    const localOff = buf.readUInt32LE(ptr + 42);
+    const name = buf.toString('utf8', ptr + 46, ptr + 46 + nameLen);
+    ptr += 46 + nameLen + extraLen + commentLen;
+    // Un dossier n'a rien à lire ; ZIP64 n'est pas géré, on saute l'entrée
+    // plutôt que de faire échouer tout le pack pour une entrée énorme.
+    if (name.endsWith('/') || localOff === 0xffffffff || compSize === 0xffffffff) continue;
+    index.set(name, { method, compSize, localOff });
+  }
+  return index;
+}
+
+/**
+ * Lit UNE entrée déjà indexée. `null` si elle n'existe pas.
+ *
+ * @param {Buffer} buf
+ * @param {Map} index rendu par `zipIndex`
+ * @param {string} name chemin dans l'archive
+ * @param {number} [max] plafond de décompression, anti zip-bomb
+ */
+export function zipRead(buf, index, name, max = MAX_ENTRY_INFLATED) {
+  const e = index.get(name);
+  if (!e) return null;
+  if (buf.readUInt32LE(e.localOff) !== LOC_SIG) return null;
+  const lNameLen = buf.readUInt16LE(e.localOff + 26);
+  const lExtraLen = buf.readUInt16LE(e.localOff + 28);
+  const start = e.localOff + 30 + lNameLen + lExtraLen;
+  const raw = buf.subarray(start, start + e.compSize);
+  return e.method === 0
+    ? Buffer.from(raw)
+    : zlib.inflateRawSync(raw, { maxOutputLength: max });
+}
+
 // Renvoie [{ name, regionX, regionZ, data:Buffer }] pour chaque r.X.Z.mca.
 export function extractMcaEntries(buf) {
   const eocd = findEocd(buf);

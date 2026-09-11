@@ -29,6 +29,7 @@ export default function App() {
   const openWorld = useApp((s) => s.openWorld);
   const loadSettings = useApp((s) => s.loadSettings);
   const loadCatalog = useApp((s) => s.loadCatalog);
+  const loadPackInfo = useApp((s) => s.loadPackInfo);
   const setSettingsOpen = useApp((s) => s.setSettingsOpen);
   const run = useApp((s) => s.run);
   const setTool = useApp((s) => s.setTool);
@@ -40,6 +41,7 @@ export default function App() {
   // un instant l'apparence par défaut, puis la verrait sauter.
   useEffect(() => { loadSettings(); }, [loadSettings]);
   useEffect(() => { loadCatalog(); }, [loadCatalog]);
+  useEffect(() => { loadPackInfo(); }, [loadPackInfo]);
 
   // Glisser-déposer sur toute la fenêtre. Le renderer ne LIT pas le fichier :
   // il n'en transmet que le chemin, et c'est le processus principal qui décide

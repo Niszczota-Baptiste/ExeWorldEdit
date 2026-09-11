@@ -283,6 +283,22 @@ app.whenReady().then(async () => {
     return { path: res.filePath, bytes: bytes.byteLength ?? bytes.length };
   });
 
+  /**
+   * Choisit un pack de ressources : un `.jar` de version, un pack zippé, ou un
+   * dossier déplié. Le moteur n'en garde que le CHEMIN — on ne recopie pas
+   * vingt mégaoctets d'assets dans l'espace de données pour en lire trois
+   * textures à la fois.
+   */
+  ipcMain.handle('shell:pickResourcePack', async () => {
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Choisir un pack de ressources',
+      properties: ['openFile', 'openDirectory'],
+      filters: [{ name: 'Pack de ressources ou .jar', extensions: ['zip', 'jar'] }],
+    });
+    if (res.canceled || !res.filePaths[0]) return null;
+    return engine.call('setResourcePack', { path: res.filePaths[0] });
+  });
+
   ipcMain.handle('shell:window', (_e, action) => {
     if (!win) return null;
     if (action === 'minimize') win.minimize();
@@ -370,6 +386,23 @@ app.whenReady().then(async () => {
             return 'ok';
           })()`);
           await new Promise((r) => setTimeout(r, 600));
+        }
+        // Remplit UN champ, désigné par son sélecteur : « sélecteur|valeur ».
+        // Même chemin que la frappe — on passe par le `value` natif et un vrai
+        // `input`, sans quoi React ne voit pas le changement.
+        if (process.env.TITI_SCREENSHOT_FILL) {
+          const coupe = process.env.TITI_SCREENSHOT_FILL.indexOf('|');
+          const sel = process.env.TITI_SCREENSHOT_FILL.slice(0, coupe);
+          const val = process.env.TITI_SCREENSHOT_FILL.slice(coupe + 1);
+          await win.webContents.executeJavaScript(`(() => {
+            const el = document.querySelector(${JSON.stringify(sel)});
+            if (!el) return 'introuvable';
+            const poser = window.Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            poser.call(el, ${JSON.stringify(val)});
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            return 'ok';
+          })()`);
+          await new Promise((r) => setTimeout(r, 900));
         }
         // Un double-clic — le geste qui ouvre un renommage d'onglet.
         if (process.env.TITI_SCREENSHOT_DBLCLICK) {

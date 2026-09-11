@@ -1,9 +1,10 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Layers, Search } from './icons.js';
 import { searchBlocks, mergeDiscovered, blockLabel } from '@titi/we-engine/blocks';
 import { useApp } from '../store.js';
 import { blockColor } from '../viewport/blockColors.js';
+import { dessineIcone } from '../grid/isoIcon.js';
 
 // Palette de blocs, en DEUX onglets :
 //
@@ -19,6 +20,28 @@ import { blockColor } from '../viewport/blockColors.js';
 // `blocks.json` d'une installation peut en ajouter des milliers. Monter tout
 // ça dans le DOM ferait ramer le viewport à chaque frappe.
 
+/**
+ * La pastille d'une ligne : l'icône du pack si on en a une, sinon le carré de
+ * couleur.
+ *
+ * Le repli n'est pas un pis-aller à supprimer un jour : sans pack configuré, ou
+ * pour un bloc qu'un pack ne connaît pas, une teinte stable dérivée du nom vaut
+ * mieux qu'un trou — et mieux qu'une icône approchée, qu'on croirait.
+ */
+function Vignette({ id, plan }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let vivant = true;
+    if (!plan) { setSrc(null); return undefined; }
+    dessineIcone(plan, 64).then((url) => { if (vivant) setSrc(url); });
+    return () => { vivant = false; };
+  }, [plan]);
+
+  if (src) return <img className="swatch swatch-icon" src={src} alt="" aria-hidden="true" />;
+  const [r, g, b] = blockColor(id);
+  return <span className="swatch" style={{ background: `rgb(${r},${g},${b})` }} />;
+}
+
 export default function BlockPalette() {
   const geometry = useApp((s) => s.geometry);
   const block = useApp((s) => s.block);
@@ -29,6 +52,8 @@ export default function BlockPalette() {
   const setTab = useApp((s) => s.setPaletteTab);
   const catalog = useApp((s) => s.catalog);
   const groups = useApp((s) => s.catalogGroups);
+  const icons = useApp((s) => s.icons);
+  const ensureIcons = useApp((s) => s.ensureIcons);
   const parentRef = useRef(null);
 
   const groupLabel = useMemo(
@@ -59,6 +84,14 @@ export default function BlockPalette() {
     estimateSize: () => 30,
     overscan: 12,
   });
+
+  // Les icônes ne sont demandées que pour les lignes VISIBLES. Le catalogue en
+  // compte plusieurs centaines et un pack peut en ajouter des milliers : les
+  // charger toutes au montage bloquerait le démarrage pour des icônes que
+  // personne ne regarde.
+  const visibles = virt.getVirtualItems();
+  const ids = visibles.map((v) => rows[v.index]?.id).filter(Boolean).join(',');
+  useEffect(() => { if (ids) ensureIcons(ids.split(',')); }, [ids, ensureIcons]);
 
   const vide = tab === 'build'
     ? (geometry ? 'Aucun bloc ne correspond.' : 'Ouvre un build pour voir sa palette.')
@@ -102,9 +135,8 @@ export default function BlockPalette() {
       <div className="palette-list" ref={parentRef}>
         {rows.length === 0 && <p className="hint" style={{ padding: '10px 12px' }}>{vide}</p>}
         <div style={{ height: virt.getTotalSize(), position: 'relative' }}>
-          {virt.getVirtualItems().map((v) => {
+          {visibles.map((v) => {
             const r = rows[v.index];
-            const [cr, cg, cb] = blockColor(r.id);
             return (
               <button
                 key={r.id}
@@ -114,7 +146,7 @@ export default function BlockPalette() {
                 onClick={() => setBlock(r.id)}
                 title={r.id}
               >
-                <span className="swatch" style={{ background: `rgb(${cr},${cg},${cb})` }} />
+                <Vignette id={r.id} plan={icons[r.id]} />
                 <span className="block-name">{blockLabel(r.id)}</span>
                 <span className="spacer" style={{ flex: 1 }} />
                 <span className="block-count">

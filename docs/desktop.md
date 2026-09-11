@@ -1388,6 +1388,121 @@ d'export le dit, sans quoi c'est une surprise.
 
 ---
 
+## Les icônes de blocs, formes comprises
+
+La palette montrait un carré de couleur par bloc. Utile pour distinguer, pas
+pour reconnaître : trente nuances de gris ne disent pas lequel est du
+cobblestone.
+
+### D'où viennent les textures
+
+Pas de ce dépôt — les assets du jeu ne peuvent pas y être redistribués.
+L'application lit le pack qu'on lui **désigne** dans les réglages : le `.jar`
+d'une version de Minecraft, un pack de ressources zippé, ou un dossier déplié.
+Le pack du serveur Minefield fournit de la même façon les blocs
+`minefield:*` — y compris leur forme.
+
+La chaîne suivie est celle du jeu, en entier :
+
+```
+assets/<ns>/blockstates/<nom>.json   quel modèle pour quel état
+assets/<ns>/models/block/<x>.json    parent, textures, elements (les cuboïdes)
+assets/<ns>/textures/block/<y>.png   l'image
+```
+
+On ne peut pas sauter directement au nom de texture. `grass_block` n'en a
+aucune qui porte son nom (c'est `grass_block_top`, `dirt`, `grass_block_side`),
+et surtout un bloc peut n'être pas un cube.
+
+Un `.jar` pèse une vingtaine de mégaoctets pour plusieurs milliers d'entrées.
+Le catalogue ZIP est indexé une fois ; chaque entrée n'est décompressée qu'à la
+demande, et la palette — virtualisée — ne demande que la vingtaine de lignes
+qu'elle affiche.
+
+### Le cas qui interdit la solution facile
+
+Tous les blocs ne sont pas des cubes. Une **chaise** `minefield:*`, un escalier,
+une dalle, un quart de bloc. Plaquer leur texture sur un carré plein donne une
+icône qui **ment sur ce qu'on pose**.
+
+`planIcone` classe donc le modèle (`cube` ou `model`) et rend ses cuboïdes ;
+l'icône les dessine un par un en projection isométrique, chaque face peinte par
+une transformation affine — une face projetée est toujours un parallélogramme,
+donc l'image d'un carré, et `setTransform` suffit sans découper en triangles.
+
+Deux détails qui ne se voient qu'une fois faux :
+
+- **Le tri en profondeur.** Sans lui, un pied de chaise se dessine par-dessus
+  l'assise.
+- **Le cadrage sur les bornes réelles.** Minecraft autorise des éléments de −16
+  à 32, et le dossier d'une chaise monte à 20 : cadrer sur 0..16 le rognait. À
+  l'inverse, une dalle cadrée sur 16 se dessinerait en trait dans un coin — là,
+  elle remplit son icône.
+
+![Blocs minefield dans la palette](images/icones-minefield.png)
+
+*Un quart de bloc, une chaise et une muraille, dessinés depuis leurs modèles.
+Le deuxième `quart de bloc` n'est pas dans ce pack : il retombe sur son carré
+de couleur — un repli assumé, pas un trou.*
+
+### Le pack déclare aussi CE QUI EXISTE
+
+Un pack contient un fichier de blockstate par bloc. C'est la liste de référence,
+`minefield:*` compris — et c'est ce qui règle le problème que ce dépôt ne peut
+pas régler seul : **désigner le pack du serveur remplit le catalogue**, sans que
+personne ait à recopier une liste d'identifiants ici. Les trois sources se
+complètent, de la plus sûre à la plus opportuniste : la palette vanilla écrite
+dans le code, le pack, puis les blocs croisés dans les builds ouverts.
+
+Un bloc absent du pack ne reçoit **pas** d'icône approchée : il garde son carré
+de couleur. Une icône fausse est pire qu'un carré, parce qu'on la croit.
+
+Pour essayer tout ça sans installer Minecraft :
+`npm run pack --workspace @titi/desktop -- <dossier>` fabrique un pack de
+démonstration — textures générées, vraie arborescence, et une chaise en six
+cuboïdes.
+
+---
+
+## Raccourcis réassignables
+
+Les touches vivaient à deux endroits : la lettre de chaque outil dans `TOOLS`,
+les combinaisons dans le gestionnaire de `App.jsx`. Rien de configurable, et
+rien qui empêchait deux actions de partager une touche. C'est la deuxième fois
+de la journée que deux constantes indépendantes divergent.
+
+`keys.js` est maintenant la seule table — pur, sans DOM, donc testable. Une
+liaison a une **forme canonique unique** : les modificateurs dans un ordre fixe,
+puis la touche (`Ctrl+Shift+Z`). C'est ce qui permet de comparer deux liaisons
+par égalité de chaînes, donc que la détection de conflit, la persistance et
+l'affichage n'aient pas chacun leur idée de la normalisation.
+
+Le test qui compte porte sur les modificateurs **absents** :
+
+```
+« Z »        répond à z          … et PAS à Ctrl+Z
+« Ctrl+Z »   répond à Ctrl+Z     … et PAS à Ctrl+Maj+Z
+```
+
+Sans ça, une annulation change d'outil au passage.
+
+Deux choix assumés :
+
+- **Ce qui est illisible est refusé, pas rafistolé.** Une liaison approximative
+  est une touche qui ne répond pas — plus déroutant qu'un retour au défaut. Un
+  `settings.json` bricolé à la main ne peut pas rendre l'application
+  inutilisable au clavier.
+- **Les conflits sont signalés, pas empêchés.** Réassigner passe forcément par
+  un état où deux actions partagent une touche ; obliger à libérer d'abord est
+  une gymnastique que personne ne fait.
+
+![Les raccourcis dans les réglages](images/raccourcis.png)
+
+Le rail affiche la liaison **effective** : une lettre par défaut affichée après
+réassignation annoncerait un raccourci qui ne marche pas.
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
@@ -1565,6 +1680,7 @@ npm run dev      --workspace @titi/desktop   # Vite + Electron en parallèle
 npm run start    --workspace @titi/desktop   # build puis lancement
 npm run dist     --workspace @titi/desktop   # installeur NSIS + portable (Windows)
 npm run demo     --workspace @titi/desktop -- <dossier-de-données>
+npm run pack     --workspace @titi/desktop -- <dossier>   # pack de ressources de démo
 
 # Capture du rendu, y compris sans écran (rendu logiciel)
 TITI_SCREENSHOT=/chemin/capture.png xvfb-run -a npx electron .
@@ -1583,6 +1699,7 @@ atteignable à la main, pas un état forcé qui pourrait mentir :
 | `TITI_SCREENSHOT_OP=mix` | choisit une opération | le vrai `<select>`, vrai `change` |
 | `TITI_SCREENSHOT_CLICK=<sélecteur>` | clique un élément | `.click()` sur le vrai bouton |
 | `TITI_SCREENSHOT_DBLCLICK=<sélecteur>` | double-clique un élément | un vrai `dblclick` (renommage d'onglet) |
+| `TITI_SCREENSHOT_FILL=<sélecteur>\|<valeur>` | remplit un champ | le `value` natif puis un vrai `input` |
 | `TITI_SCREENSHOT_TYPE=<texte>` | tape puis valide | de vrais événements `char`, puis `Entrée` |
 | `TITI_SCREENSHOT_CLICK_WAIT=20000` | attend après le clic | un clic peut lancer une opération longue |
 
@@ -1606,6 +1723,7 @@ jetable sans toucher au vrai.
 | 2.2 | Ouverture et export | **fait** — `.mca`, `.zip`, dossier de save, dossier `region/`, `.schem`, `.litematic`, glisser-déposer ; export `.mca`/`.schem`/`.litematic` ; « Appliquer au monde » avec verrou `session.lock` et sauvegarde horodatée. Reste : récupération après crash explicite (le staging est déjà persistant) |
 | 2.3 | Direction visuelle (jetons, Pretendard, roue d'outils) | **fait** |
 | 2.4 | Disposition (panneaux, inspecteur généré, palette virtualisée) | fait pour l'essentiel ; `Ctrl+K` et thème clair à venir |
+| 2.4f | Icônes de blocs et raccourcis réassignables | **fait** — pack de ressources (`.jar`, zip ou dossier), modèles non cubiques dessinés par cuboïdes, catalogue rempli par le pack ; table de raccourcis unique et réassignable |
 | 2.4e | Renommer un projet | **fait** — double-clic sur l'onglet ; les lettres custom survivent jusqu'au nom de fichier exporté |
 | 2.4d | Écrans « Texte et carte », « Relief », « Bibliothèque » | **fait** — texte par la police embarquée, image en couleurs ou en silhouette, relief à l'aller et au retour, rangement et reprise par le presse-papier du moteur |
 | 2.4c | Commandes complètes et catalogue de blocs | **fait** — les 29 opérations atteignables, champs `blocklist`/`pattern`/`mask`, presse-papier et biome branchés, raccourcis d'outil, catalogue de 346 blocs + `blocks.json` pour les `minefield:*`. Reste : les écrans « Texte et carte », « Relief » et « Bibliothèque », dont le moteur est prêt |

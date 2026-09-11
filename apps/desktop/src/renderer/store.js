@@ -112,6 +112,57 @@ export const useApp = create((set, get) => ({
   /** Raccourcis effectifs : les défauts, complétés par ce que l'utilisateur a posé. */
   keys: DEFAULT_KEYS,
 
+  // ── Icônes de blocs ───────────────────────────────────────────────────────
+  //
+  // Un cache par identifiant, rempli en LOT pour ce que la palette affiche.
+  // `null` y est une valeur légitime : « ce bloc n'a pas d'icône dans le pack »
+  // est une réponse, et la redemander à chaque défilement serait du gâchis.
+  icons: {},
+  /** Pack configuré : `{ path, ok, reason }`, ou `null` tant qu'on ne sait pas. */
+  pack: null,
+
+  async loadPackInfo() {
+    try { set({ pack: await api().engine.resourcePackInfo() }); } catch { set({ pack: null }); }
+    return get().pack;
+  },
+
+  /** Ouvre le dialogue : c'est le principal qui choisit le chemin, pas nous. */
+  async pickResourcePack() {
+    try {
+      const pack = await api().pickResourcePack();
+      if (!pack) return null;
+      set({ pack, icons: {} });
+      get().say(pack.ok
+        ? `Pack de ressources : ${pack.path}`
+        : `Ce dossier ou fichier n’est pas un pack de ressources (${pack.reason}).`);
+      return pack;
+    } catch (e) { get().say(errorText(e, 'pack de ressources')); return null; }
+  },
+
+  async setResourcePack(chemin) {
+    try {
+      const pack = await api().engine.setResourcePack({ path: chemin });
+      // Les icônes du pack précédent n'ont plus rien à voir avec le nouveau.
+      set({ pack, icons: {} });
+      get().say(pack.ok
+        ? `Pack de ressources : ${pack.path}`
+        : `Ce dossier ou fichier n’est pas un pack de ressources (${pack.reason}).`);
+      return pack;
+    } catch (e) { get().say(errorText(e, 'pack de ressources')); return null; }
+  },
+
+  /** Demande les icônes qui manquent. Rend le nombre effectivement ajouté. */
+  async ensureIcons(ids) {
+    const connus = get().icons;
+    const manquants = [...new Set(ids)].filter((id) => !(id in connus));
+    if (!manquants.length || get().pack?.ok === false) return 0;
+    try {
+      const lot = await api().engine.blockIcons({ ids: manquants });
+      set((st) => ({ icons: { ...st.icons, ...lot } }));
+      return Object.keys(lot).length;
+    } catch { return 0; }
+  },
+
   async loadSettings() {
     let settings = DEFAULT_SETTINGS;
     try {

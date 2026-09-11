@@ -10,3 +10,5 @@ export * from './textRender.js';
 export * from './zipWriter.js';
 export * from './operations.js';
 export * from './jobs.js';
+export * from './resourcePack.js';
+export { zipIndex, zipRead } from './zipReader.js';

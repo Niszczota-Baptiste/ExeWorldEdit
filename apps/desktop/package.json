@@ -13,6 +13,7 @@
     "build": "vite build",
     "start": "npm run build && electron .",
     "demo": "node scripts/make-demo.js",
+    "pack": "node scripts/make-pack.js",
     "icon": "electron scripts/make-icon.js",
     "predist": "node scripts/clean-release.js",
     "dist": "npm run build && electron-builder --win --publish never",

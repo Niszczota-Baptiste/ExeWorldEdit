@@ -15,6 +15,8 @@ import { CATALOG, GROUPS, normalizeExtras } from '@titi/we-engine/blocks';
 import { renderTextSvg } from '@titi/we-engine/worldedit';
 import { flatBlockColors } from '@titi/we-engine/colors';
 import { safeFileNameExt } from '@titi/we-engine/filename';
+import { planIcone } from '@titi/we-engine/worldedit';
+import { zipIndex, zipRead } from '@titi/we-engine/worldedit';
 import { PANEL_PRESETS } from '@titi/we-engine/staging';
 
 // LE MOTEUR — tourne dans un `utilityProcess`, jamais dans le renderer.
@@ -47,6 +49,72 @@ const project = (id) => {
 // un SVG de plusieurs mégaoctets pour le traverser aussitôt.
 const clampSide = (v) => Math.max(1, Math.min(1024, Math.round(Number(v)) || 1));
 const clampSS = (v) => Math.max(1, Math.min(8, Math.round(Number(v)) || 1));
+
+/**
+ * Pack de ressources ouvert, gardé d'un appel à l'autre.
+ *
+ * Un `.jar` de Minecraft pèse une vingtaine de mégaoctets pour plusieurs
+ * milliers d'entrées : réindexer son catalogue à chaque icône rendrait la
+ * palette inutilisable. L'index est fait une fois ; chaque entrée n'est
+ * décompressée qu'à la demande.
+ */
+let packCache = null;
+
+/** `assets/<ns>/blockstates/<nom>.json` → `ns:nom`. */
+const idDepuisBlockstate = (chemin) => {
+  const m = chemin.match(/^assets\/([a-z0-9_.-]+)\/blockstates\/([a-z0-9_./-]+)\.json$/);
+  return m ? `${m[1]}:${m[2]}` : null;
+};
+
+function ouvrePack(chemin) {
+  if (packCache?.chemin === chemin) return packCache.pack;
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin choisi par l'utilisateur dans un dialogue
+  const stat = fs.statSync(chemin);
+  let pack;
+  if (stat.isDirectory()) {
+    pack = {
+      count: null,
+      /** Les blocs DÉCLARÉS par le pack : un fichier de blockstate par bloc. */
+      ids: () => {
+        const out = [];
+        const assets = path.join(chemin, 'assets');
+        // eslint-disable-next-line security/detect-non-literal-fs-filename -- racine choisie par l'utilisateur dans un dialogue
+        if (!fs.existsSync(assets)) return out;
+        // eslint-disable-next-line security/detect-non-literal-fs-filename -- idem
+        for (const ns of fs.readdirSync(assets)) {
+          const dir = path.join(assets, ns, 'blockstates');
+          // eslint-disable-next-line security/detect-non-literal-fs-filename -- idem
+          if (!fs.existsSync(dir)) continue;
+          // eslint-disable-next-line security/detect-non-literal-fs-filename -- idem
+          for (const f of fs.readdirSync(dir)) {
+            const id = idDepuisBlockstate(`assets/${ns}/blockstates/${f}`);
+            if (id) out.push(id);
+          }
+        }
+        return out;
+      },
+      read: (nom) => {
+        // Un nom d'entrée vient de NOS résolveurs, pas d'une saisie ; on refuse
+        // quand même tout ce qui remonte, plutôt que de faire confiance.
+        if (nom.includes('..')) return null;
+        const f = path.join(chemin, nom);
+        // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin joint sous la racine choisie
+        return fs.existsSync(f) ? fs.readFileSync(f) : null;
+      },
+    };
+  } else {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- idem
+    const buf = fs.readFileSync(chemin);
+    const index = zipIndex(buf);
+    pack = {
+      count: index.size,
+      ids: () => [...index.keys()].map(idDepuisBlockstate).filter(Boolean),
+      read: (nom) => zipRead(buf, index, nom),
+    };
+  }
+  packCache = { chemin, pack };
+  return pack;
+}
 
 /** Ce que l'interface a besoin de savoir d'un projet, et rien de plus. */
 const projectState = (p) => ({
@@ -464,7 +532,88 @@ const methods = {
   listBlocks: () => {
     const extras = normalizeExtras(adapter.readBlockExtras());
     const connus = new Set(CATALOG.map((b) => b.id));
-    return { groups: GROUPS, blocks: [...CATALOG, ...extras.filter((b) => !connus.has(b.id))] };
+    const blocks = [...CATALOG, ...extras.filter((b) => !connus.has(b.id))];
+    for (const b of blocks) connus.add(b.id);
+
+    // Le PACK est la liste de référence de ce qui existe : un fichier de
+    // blockstate par bloc, `minefield:*` compris. C'est ce qui rend le
+    // catalogue complet sans que ce dépôt ait à connaître les blocs du
+    // serveur — désigner le pack du serveur suffit.
+    const chemin = adapter.readSettings().resourcePack;
+    if (chemin) {
+      try {
+        for (const id of ouvrePack(chemin).ids()) {
+          if (connus.has(id)) continue;
+          connus.add(id);
+          blocks.push({ id, group: id.startsWith('minefield:') ? 'minefield' : 'autre', fromPack: true });
+        }
+      } catch { /* pack illisible : le catalogue se contente du reste */ }
+    }
+    return { groups: GROUPS, blocks };
+  },
+
+  // ── Icônes de blocs ───────────────────────────────────────────────────────
+  //
+  // Les textures du jeu ne sont pas dans ce dépôt et ne peuvent pas y être :
+  // l'application lit le pack que l'utilisateur lui désigne — le `.jar` d'une
+  // version de Minecraft, un pack zippé, ou un dossier déplié. Le pack du
+  // serveur fournit de la même façon les blocs `minefield:*`.
+
+  /** Ce que l'écran des réglages a besoin de savoir du pack configuré. */
+  resourcePackInfo: () => {
+    const chemin = adapter.readSettings().resourcePack || null;
+    if (!chemin) return { path: null, ok: false, reason: 'aucun' };
+    try {
+      const pack = ouvrePack(chemin);
+      // Une sonde plutôt qu'un simple test d'existence : un dossier qui n'est
+      // pas un pack, ou un zip sans `assets/`, doit se dire tout de suite et
+      // pas au premier bloc qui n'a pas d'icône.
+      const sonde = pack.read('assets/minecraft/blockstates/stone.json')
+        || pack.read('pack.mcmeta');
+      return { path: chemin, ok: !!sonde, reason: sonde ? 'ok' : 'pas_un_pack', entries: pack.count ?? null };
+    } catch (err) {
+      return { path: chemin, ok: false, reason: err?.message || 'illisible' };
+    }
+  },
+
+  setResourcePack: ({ path: chemin }) => {
+    packCache = null; // le prochain accès rouvre
+    adapter.writeSettings({ resourcePack: chemin || null });
+    return methods.resourcePackInfo();
+  },
+
+  /**
+   * Icônes de plusieurs blocs d'un coup.
+   *
+   * En lot parce que la palette est virtualisée : elle en demande la vingtaine
+   * qu'elle affiche, pas les trois cent quarante-six du catalogue. Un aller-
+   * retour par ligne ferait vingt allers-retours par défilement.
+   *
+   * Rend `null` pour un bloc absent du pack — jamais une icône approchée : une
+   * icône fausse est pire qu'un carré de couleur, parce qu'on la croit.
+   */
+  blockIcons: ({ ids }) => {
+    const chemin = adapter.readSettings().resourcePack;
+    if (!chemin) return {};
+    let pack;
+    try { pack = ouvrePack(chemin); } catch { return {}; }
+
+    const out = {};
+    for (const id of (Array.isArray(ids) ? ids : []).slice(0, 256)) {
+      let plan;
+      try { plan = planIcone(pack, id); } catch { plan = null; }
+      if (!plan) { out[id] = null; continue; }
+      // Les PNG partent en `data:` : une texture de bloc fait 16 × 16, donc
+      // quelques centaines d'octets, et le renderer n'a qu'à les donner à une
+      // `Image`. Pas de fichier temporaire, pas de second protocole.
+      const textures = {};
+      for (const [cle, fichier] of Object.entries(plan.textures)) {
+        const buf = pack.read(fichier);
+        if (buf) textures[cle] = `data:image/png;base64,${buf.toString('base64')}`;
+      }
+      out[id] = Object.keys(textures).length ? { kind: plan.kind, elements: plan.elements, textures } : null;
+    }
+    return out;
   },
 
   // ── Diagnostic ────────────────────────────────────────────────────────────
