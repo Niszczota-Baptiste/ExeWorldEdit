@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { DEFAULT_SETTINGS, normalizeSettings, applyTheme } from './theme.js';
 import { DEFAULT_KEYS, normalizeKeys } from './keys.js';
+import { normalizeLayout, movePanel, setActive } from './layout.js';
 import { TOOL_OPS } from './tools.js';
 import { registerColors } from './viewport/blockColors.js';
 
@@ -41,6 +42,8 @@ export const useApp = create((set, get) => ({
   settingsOpen: false,
   /** Relevés par phase des dernières opérations, plus récent en tête. */
   perfLog: [],
+  /** Le journal du moteur, brut, plus récent en tête. */
+  auditLog: [],
   engineInfo: null,
   // Plafonds du moteur et leurs bornes. Séparés de `settings` : ceux-là sont
   // l'affaire du moteur, `normalizeSettings` (theme.js) ne les connaît pas.
@@ -75,7 +78,7 @@ export const useApp = create((set, get) => ({
   },
 
   async activate(id) {
-    set({ activeId: id, geometry: null, selection: null, perfLog: [] });
+    set({ activeId: id, geometry: null, selection: null, perfLog: [], auditLog: [] });
     const geometry = await api().engine.getGeometry({ id });
     const project = get().projects.find((p) => p.id === id);
     set({
@@ -175,7 +178,7 @@ export const useApp = create((set, get) => ({
       set({ limits: raw.limits || null, limitRanges: raw.limitRanges || null });
     } catch { /* premier lancement, ou moteur pas encore prêt */ }
     applyTheme(settings);
-    set({ settings, keys: normalizeKeys(settings.keys) });
+    set({ settings, keys: normalizeKeys(settings.keys), layout: normalizeLayout(settings.layout) });
     return settings;
   },
 
@@ -239,8 +242,11 @@ export const useApp = create((set, get) => ({
    */
   async loadPerf(id) {
     try {
-      const lines = await api().engine.audit({ id, limit: 40 });
+      const lines = await api().engine.audit({ id, limit: 60 });
       set({
+        // Un seul aller-retour pour les deux vues : le relevé est le journal
+        // filtré sur ce qui a été chronométré, pas une seconde source.
+        auditLog: lines,
         perfLog: lines
           .filter((l) => l.timings?.phases?.length)
           .map((l) => ({
@@ -283,7 +289,7 @@ export const useApp = create((set, get) => ({
     }
     const reste = await get().refreshProjects({ activateFirst: false });
     if (get().activeId === id) {
-      set({ activeId: null, geometry: null, selection: null, perfLog: [] });
+      set({ activeId: null, geometry: null, selection: null, perfLog: [], auditLog: [] });
       if (reste[0]) await get().activate(reste[0].id);
     }
     get().say(`« ${p.name} » fermé.`);
@@ -404,6 +410,44 @@ export const useApp = create((set, get) => ({
     }
   },
 
+  // ── Disposition des panneaux ──────────────────────────────────────────────
+  //
+  // Elle se SAUVE toute seule, à chaque déplacement. Un bouton « enregistrer la
+  // disposition » est un bouton qu'on oublie de cliquer, et retrouver son
+  // interface défaite au lancement suivant est exactement ce qu'on ne veut pas.
+  layout: normalizeLayout(null),
+  /** Vrai pendant qu'un onglet est en cours de déplacement. */
+  dragging: false,
+  setDragging: (dragging) => set({ dragging }),
+
+  movePanel(panelId, zone, index) {
+    const layout = movePanel(get().layout, panelId, zone, index);
+    set({ layout, dragging: false });
+    get().persistLayout(layout);
+  },
+
+  setActivePanel(zone, panelId) {
+    const layout = setActive(get().layout, zone, panelId);
+    set({ layout });
+    get().persistLayout(layout);
+  },
+
+  resetLayout() {
+    const layout = normalizeLayout(null);
+    set({ layout });
+    get().persistLayout(layout);
+  },
+
+  /**
+   * Écrit la disposition dans les réglages, sans passer par `updateSettings` :
+   * celui-ci réapplique le thème, et rafraîchir toutes les variables CSS à
+   * chaque onglet déplacé ferait clignoter l'interface pendant le glisser.
+   */
+  async persistLayout(layout) {
+    set((st) => ({ settings: { ...st.settings, layout } }));
+    try { await api().engine.saveSettings({ patch: { layout } }); } catch { /* la session garde quand même */ }
+  },
+
   /** Réglages du pinceau. Ils vivent dans le store : le viewport les LIT. */
   brush: { shape: 'sphere', radius: 2, mode: 'paint' },
   setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
@@ -505,6 +549,9 @@ export const useApp = create((set, get) => ({
       }
       // `copy` et `cut` remplissent le presse-papier du moteur : la bibliothèque
       // et le message de « Coller » s'y fient, et rien d'autre ne le leur dit.
+      // Le journal se relit depuis le moteur : c'est lui qui l'écrit, et une
+      // liste tenue en parallèle par l'interface finirait par en diverger.
+      get().loadPerf(id);
       if (operation === 'copy' || operation === 'cut') set({ clipboardReady: true });
       get().say(`${operation} — ${res.blocksChanged.toLocaleString('fr-FR')} blocs en ${res.durationMs} ms.`);
       return res;
@@ -526,6 +573,7 @@ export const useApp = create((set, get) => ({
       await api().engine[which]({ id });
       await get().refreshProjects();
       set({ geometry: await api().engine.getGeometry({ id }) });
+      get().loadPerf(id);
       get().say(which === 'undo' ? 'Opération annulée.' : 'Opération rétablie.');
     } catch (e) {
       get().say(errorText(e, which));

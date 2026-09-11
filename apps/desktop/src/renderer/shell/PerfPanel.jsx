@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Gauge, ChevronDown, X } from './icons.js';
+import { DockExtra } from './dockSlot.js';
 import { useApp } from '../store.js';
 
 // Relevé de performance en direct.
@@ -22,7 +23,20 @@ const phaseOf = (id) => PHASES[id] || { label: id, short: id, color: '#5A6472' }
 
 const ms = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)} s` : `${Math.round(n)} ms`);
 
-export default function PerfPanel() {
+/**
+ * Le relevé, en DEUX présentations.
+ *
+ *   flottant  posé sur le viewport, repliable, fermable — le direct qu'on
+ *             garde sous les yeux pendant qu'une commande tourne. C'est le
+ *             réglage `perf` qui l'affiche.
+ *   rangé     l'onglet « Performances » d'un emplacement : même contenu, à la
+ *             taille d'un panneau. Demander l'onglet EST la demande de le
+ *             voir, donc il ne repasse pas par le réglage.
+ *
+ * Un seul corps pour les deux : deux copies du même relevé finiraient par ne
+ * plus montrer la même chose.
+ */
+export default function PerfPanel({ docked = false }) {
   const on = useApp((s) => s.settings.perf);
   const log = useApp((s) => s.perfLog);
   const busy = useApp((s) => s.busy);
@@ -30,23 +44,30 @@ export default function PerfPanel() {
   const info = useApp((s) => s.engineInfo);
   const refreshInfo = useApp((s) => s.refreshEngineInfo);
   const [folded, setFolded] = useState(false);
+  const visible = docked || on;
+  const deplie = docked || !folded;
 
   // La mémoire du moteur ne se sonde que quand on la regarde : un RPC toutes
   // les deux secondes en permanence réveillerait le processus pour rien.
   useEffect(() => {
-    if (!on || folded) return undefined;
+    if (!visible || !deplie) return undefined;
     refreshInfo();
     const t = setInterval(refreshInfo, 2000);
     return () => clearInterval(t);
-  }, [on, folded, refreshInfo]);
+  }, [visible, deplie, refreshInfo]);
 
-  if (!on) return null;
+  if (!visible) return null;
 
-  // Cumul par phase sur tout le relevé : une commande lente une fois est un
-  // accident, la même phase lente dix fois est une cible.
-  const totals = new Map();
-  for (const e of log) for (const p of e.phases) totals.set(p.phase, (totals.get(p.phase) || 0) + p.ms);
-  const grand = [...totals.values()].reduce((s, v) => s + v, 0);
+  const corps = <Corps log={log} busy={busy} stats={stats} info={info} />;
+
+  if (docked) {
+    return (
+      <section className="side-panel">
+        <DockExtra>{stats.fps ?? '—'} i/s</DockExtra>
+        <div className="perf-scroll">{corps}</div>
+      </section>
+    );
+  }
 
   return (
     <div className="perf" data-folded={folded}>
@@ -71,56 +92,67 @@ export default function PerfPanel() {
         </button>
       </header>
 
-      {!folded && (
-        <div className="perf-body">
-          {/* Le direct d'abord : c'est ce qu'on regarde pendant qu'une commande
-              tourne. L'historique est en dessous, pour après. */}
-          <div className="perf-live-row">
-            <span>{stats.fps ?? '—'} i/s</span>
-            {stats.drawCalls != null && <span>{stats.drawCalls} dessins</span>}
-            {stats.chunks != null && <span>{stats.chunks} chunks</span>}
-            {info?.memory && <span>{Math.round(info.memory.rss / 1e6)} Mo</span>}
-          </div>
+      {!folded && corps}
+    </div>
+  );
+}
 
-          {busy && (
-            <div className="perf-now">
-              <span className="perf-dot" style={{ background: phaseOf(busy.phase).color }} />
-              <b>{busy.operation}</b>
-              <span>{phaseOf(busy.phase).label}</span>
-              <span className="perf-now-pct">{busy.pct || 0} %</span>
-            </div>
-          )}
+/** Le contenu du relevé, sans rien savoir de l'endroit où il est posé. */
+function Corps({ log, busy, stats, info }) {
+  // Cumul par phase sur tout le relevé : une commande lente une fois est un
+  // accident, la même phase lente dix fois est une cible.
+  const totals = new Map();
+  for (const e of log) for (const p of e.phases) totals.set(p.phase, (totals.get(p.phase) || 0) + p.ms);
+  const grand = [...totals.values()].reduce((s, v) => s + v, 0);
 
-          {log.length === 0 && !busy && (
-            <p className="hint" style={{ margin: 0 }}>
-              Aucune opération mesurée sur ce build. Lance une commande : son
-              découpage apparaîtra ici.
-            </p>
-          )}
+  return (
+    <div className="perf-body">
+      {/* Le direct d'abord : c'est ce qu'on regarde pendant qu'une commande
+          tourne. L'historique est en dessous, pour après. */}
+      <div className="perf-live-row">
+        <span>{stats.fps ?? '—'} i/s</span>
+        {stats.drawCalls != null && <span>{stats.drawCalls} dessins</span>}
+        {stats.chunks != null && <span>{stats.chunks} chunks</span>}
+        {info?.memory && <span>{Math.round(info.memory.rss / 1e6)} Mo</span>}
+      </div>
 
-          {log.slice(0, 6).map((e, i) => <Row key={`${e.at}-${i}`} entry={e} />)}
+      {busy && (
+        <div className="perf-now">
+          <span className="perf-dot" style={{ background: phaseOf(busy.phase).color }} />
+          <b>{busy.operation}</b>
+          <span>{phaseOf(busy.phase).label}</span>
+          <span className="perf-now-pct">{busy.pct || 0} %</span>
+        </div>
+      )}
 
-          {grand > 0 && (
-            <div className="perf-totals">
-              <span className="perf-totals-label">Cumul sur {log.length} opération{log.length > 1 ? 's' : ''}</span>
-              {[...totals.entries()]
-                .sort((a, b) => b[1] - a[1])
-                .map(([id, v]) => (
-                  <span key={id} className="perf-total">
-                    <i style={{ background: phaseOf(id).color }} />
-                    {phaseOf(id).short}
-                    <b>{Math.round((v / grand) * 100)} %</b>
-                  </span>
-                ))}
-            </div>
-          )}
+      {log.length === 0 && !busy && (
+        <p className="hint" style={{ margin: 0 }}>
+          Aucune opération mesurée sur ce build. Lance une commande : son
+          découpage apparaîtra ici.
+        </p>
+      )}
 
-          {stats.meshMs != null && (
-            <div className="perf-foot">
-              Maillage du dernier aperçu : <b>{ms(stats.meshMs)}</b> — fait dans
-              le renderer, il n’entre pas dans les totaux ci-dessus.
-            </div>
-          )}
+      {log.slice(0, 6).map((e, i) => <Row key={`${e.at}-${i}`} entry={e} />)}
+
+      {grand > 0 && (
+        <div className="perf-totals">
+          <span className="perf-totals-label">Cumul sur {log.length} opération{log.length > 1 ? 's' : ''}</span>
+          {[...totals.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .map(([id, v]) => (
+              <span key={id} className="perf-total">
+                <i style={{ background: phaseOf(id).color }} />
+                {phaseOf(id).short}
+                <b>{Math.round((v / grand) * 100)} %</b>
+              </span>
+            ))}
+        </div>
+      )}
+
+      {stats.meshMs != null && (
+        <div className="perf-foot">
+          Maillage du dernier aperçu : <b>{ms(stats.meshMs)}</b> — fait dans
+          le renderer, il n’entre pas dans les totaux ci-dessus.
         </div>
       )}
     </div>

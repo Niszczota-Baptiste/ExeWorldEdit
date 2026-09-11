@@ -21,6 +21,8 @@ export const DEFAULT_SETTINGS = {
    * `writeSettings` les persistent comme le reste.
    */
   keys: {},
+  /** Où vivent les panneaux. Sa forme et ses défauts sont dans `layout.js`. */
+  layout: null,
 };
 
 /** Bornes des curseurs. Au-delà, l'interface se casse — autant refuser avant. */
@@ -120,6 +122,9 @@ export function normalizeSettings(raw = {}) {
     // liste des actions ; l'importer ici ferait un cycle (keys → store →
     // theme). Ce module ne s'occupe que de l'apparence.
     keys: (raw?.keys && typeof raw.keys === 'object' && !Array.isArray(raw.keys)) ? { ...raw.keys } : {},
+    // Même raison que `keys` : la validation vit dans `layout.js`, qui connaît
+    // la liste des panneaux. Ce module ne s'occupe que de l'apparence.
+    layout: (raw?.layout && typeof raw.layout === 'object' && !Array.isArray(raw.layout)) ? { ...raw.layout } : null,
   };
 }
 

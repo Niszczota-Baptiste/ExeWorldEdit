@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Layers, Search } from './icons.js';
+import { Search } from './icons.js';
 import { searchBlocks, mergeDiscovered, blockLabel } from '@titi/we-engine/blocks';
+import { DockExtra } from './dockSlot.js';
 import { useApp } from '../store.js';
 import { blockColor } from '../viewport/blockColors.js';
 import { dessineIcone } from '../grid/isoIcon.js';
@@ -98,13 +99,8 @@ export default function BlockPalette() {
     : (catalog ? 'Aucun bloc ne correspond.' : 'Catalogue en cours de chargement…');
 
   return (
-    <section className="side-panel" style={{ flex: 1, borderTop: '1px solid var(--line)' }}>
-      <div className="panel-head">
-        <Layers size={13} />
-        <span>Palette de blocs</span>
-        <span className="spacer" />
-        <span style={{ color: 'var(--text-faint)' }}>{rows.length}</span>
-      </div>
+    <section className="side-panel">
+      <DockExtra>{rows.length} blocs</DockExtra>
 
       <div className="palette-tabs" role="tablist">
         {[['build', 'Dans le build'], ['catalogue', 'Catalogue']].map(([id, label]) => (

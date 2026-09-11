@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { Play, Settings2, Undo2, Redo2, FileDown, Globe, AlertTriangle, Plus, Minus } from './icons.js';
+import { Play, Undo2, Redo2, FileDown, Globe, AlertTriangle, Plus, Minus } from './icons.js';
 import { OPERATIONS } from '@titi/we-engine/operations';
 import { useApp } from '../store.js';
 import { TOOL_OPS, TOOLS, TOOL_NOTES } from '../tools.js';
@@ -8,6 +8,7 @@ import HeightmapTool from './tools/HeightmapTool.jsx';
 import LibraryTool from './tools/LibraryTool.jsx';
 import BrushTool from './tools/BrushTool.jsx';
 import { ActionSlot } from './actionSlot.js';
+import { DockExtra } from './dockSlot.js';
 
 /**
  * Outils qui ont leur PROPRE écran au lieu d'un formulaire généré.
@@ -92,8 +93,7 @@ export default function Inspector() {
 
   if (!project) {
     return (
-      <section className="side-panel" style={{ flex: 1 }}>
-        <Head icon={<Settings2 size={13} />} title="Inspecteur" />
+      <section className="side-panel">
         <div className="panel-body">
           <p className="hint">Ouvre un build pour accéder aux outils.</p>
         </div>
@@ -102,8 +102,10 @@ export default function Inspector() {
   }
 
   return (
-    <section className="side-panel" style={{ flex: 1 }}>
-      <Head icon={<Settings2 size={13} />} title={toolMeta?.label || 'Inspecteur'} />
+    <section className="side-panel">
+      {/* L'onglet dit déjà « Inspecteur » ; ce qui manque, c'est l'outil en
+          cours — c'est donc lui qui va au bout de la barre d'onglets. */}
+      <DockExtra>{toolMeta?.label || ''}</DockExtra>
       <div className="panel-body">
         {/* La sélection d'abord : c'est SUR QUOI on opère, donc ça précède le
             choix de l'opération. Reléguée en bas, elle passait sous la ligne de
@@ -229,17 +231,6 @@ function ApplyToWorld({ project, onApply }) {
           avant toute écriture, et le monde est refusé s’il est ouvert dans Minecraft.
         </span>
       </p>
-    </div>
-  );
-}
-
-function Head({ icon, title, extra }) {
-  return (
-    <div className="panel-head">
-      {icon}
-      <span>{title}</span>
-      <span className="spacer" />
-      {extra}
     </div>
   );
 }

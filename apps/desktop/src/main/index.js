@@ -443,6 +443,35 @@ app.whenReady().then(async () => {
           win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
           await new Promise((r) => setTimeout(r, 800));
         }
+        // Un onglet de panneau DÉPLACÉ : « panneau|emplacement ». De vrais
+        // `DragEvent` portant un vrai `DataTransfer`, donc le même chemin que
+        // la souris — c'est le seul moyen de vérifier qu'un panneau se range
+        // vraiment là où on le lâche. Emplacement vide (« palette| ») : le
+        // glisser démarre et s'arrête là, ce qui montre les zones de dépôt.
+        if (process.env.TITI_SCREENSHOT_DOCK) {
+          const [panneau, zone] = process.env.TITI_SCREENSHOT_DOCK.split('|');
+          const rendu = await win.webContents.executeJavaScript(`(async () => {
+            const panneau = ${JSON.stringify(panneau)};
+            const zone = ${JSON.stringify(zone || '')};
+            const src = [...document.querySelectorAll('.dock-tab')].find((b) => b.dataset.panel === panneau);
+            if (!src) return 'onglet introuvable : ' + panneau;
+            const dt = new DataTransfer();
+            const env = (type, cible) => cible.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }));
+            env('dragstart', src);
+            // React doit repeindre pour que les bordures de dépôt existent.
+            await new Promise((r) => setTimeout(r, 250));
+            if (!zone) return 'glisser en cours';
+            const cible = document.querySelector('.dock-empty[data-zone="' + zone + '"]')
+              || document.querySelector('.dock[data-zone="' + zone + '"] .dock-tabs');
+            if (!cible) return 'emplacement introuvable : ' + zone;
+            env('dragover', cible);
+            env('drop', cible);
+            env('dragend', src);
+            return 'déposé en ' + zone;
+          })()`);
+          console.log(`déplacement de panneau : ${rendu}`);
+          await new Promise((r) => setTimeout(r, 600));
+        }
         // Un bouton de l'interface, par son sélecteur — `.click()` sur le vrai
         // élément, donc le même chemin qu'un clic de souris.
         if (process.env.TITI_SCREENSHOT_CLICK) {

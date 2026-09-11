@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Settings2, Gauge, Type, Layers, RotateCcw, Boxes, Ruler, AlertTriangle, FolderOpen, X } from './icons.js';
+import { Settings2, Gauge, Type, Layers, Layers3, RotateCcw, Boxes, Ruler, AlertTriangle, FolderOpen, X } from './icons.js';
 import { useApp } from '../store.js';
 import { ACCENTS, RANGES, DEFAULT_SETTINGS } from '../theme.js';
 import { ACTIONS, KEY_GROUPS, DEFAULT_KEYS, describeBinding, bindingFromEvent, keyConflicts } from '../keys.js';
+import { PANELS, ZONES, normalizeLayout } from '../layout.js';
 
 // Réglages de l'atelier : lisibilité, densité, couleur, mode performance.
 //
@@ -25,6 +26,8 @@ export default function Settings() {
   const keys = useApp((s) => s.keys);
   const setKey = useApp((s) => s.setKey);
   const resetKeys = useApp((s) => s.resetKeys);
+  const layout = useApp((s) => s.layout);
+  const resetLayout = useApp((s) => s.resetLayout);
   const pack = useApp((s) => s.pack);
   const pickPack = useApp((s) => s.pickResourcePack);
   const setPacks = useApp((s) => s.setResourcePacks);
@@ -151,6 +154,29 @@ export default function Settings() {
                 </button>
               )}
             </div>
+          </Section>
+
+          <Section icon={<Layers3 size={12} />} title="Disposition des panneaux">
+            <p className="hint" style={{ marginTop: 0 }}>
+              Les panneaux se déplacent à la souris : attrape l’onglet d’un
+              panneau et dépose-le où tu veux — à gauche, à droite en haut, à
+              droite en bas, ou en bas sous la vue. La disposition s’enregistre
+              toute seule, il n’y a rien à valider.
+            </p>
+            <ul className="hint" style={{ margin: '0 0 8px', paddingLeft: 18 }}>
+              {ZONES.map((z) => (
+                <li key={z.id}>
+                  <b>{z.label}</b> — {(layout.zones[z.id] || []).map((id) => PANELS.find((p) => p.id === id)?.label).join(', ') || 'vide'}
+                </li>
+              ))}
+            </ul>
+            <button
+              className="btn"
+              onClick={resetLayout}
+              disabled={JSON.stringify(layout) === JSON.stringify(normalizeLayout(null))}
+            >
+              <RotateCcw size={13} /> Disposition d’origine
+            </button>
           </Section>
 
           <Section icon={<Ruler size={12} />} title="Raccourcis clavier">

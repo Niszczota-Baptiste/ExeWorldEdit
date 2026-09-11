@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (414 tests aujourd'hui : 329 moteur, 85 desktop)
+npm test          # tous les paquets (429 tests aujourd'hui : 329 moteur, 100 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -116,6 +116,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Un code d'erreur | `ERREURS` (`apps/desktop/src/renderer/store.js`), en français et en disant QUOI FAIRE — un test relit les `new Error()` des deux moteurs et refuse un code sans phrase |
 | Une couleur de bloc pour le viewport | `EXTRA` dans `apps/desktop/src/renderer/viewport/blockColors.js` (en attendant l'atlas) |
 | Un réglage de l'application | `DEFAULT_SETTINGS` (`apps/desktop/src/renderer/theme.js`) + son champ dans `Settings.jsx` ; il se persiste tout seul via `readSettings`/`writeSettings` de l'adapter |
+| Un panneau déplaçable | `PANELS` (`apps/desktop/src/renderer/layout.js`) + son composant dans la table `PANNEAUX` (`App.jsx`) + son icône dans `shell/icons.js`. Deux tests l'exigent. Il n'écrit PAS sa propre barre de titre : l'onglet porte le nom, son chiffre remonte par `DockExtra` (`shell/dockSlot.js`) |
 | Une variable de thème ou de densité | `theme.js` ET `tokens.css` — un test compare les deux à l'échelle 1, ne pas n'en changer qu'une |
 | Une icône dans l'interface | `apps/desktop/src/renderer/shell/icons.js` — le SEUL fichier du renderer qui importe `lucide-react` |
 | L'icône de l'application (exe, installeur) | `apps/desktop/scripts/make-icon.js`, puis `npm run icon --workspace @titi/desktop` — le binaire est régénérable, jamais retouché à la main |
@@ -431,6 +432,15 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   pas (`::-webkit-scrollbar-corner`). Il n'apparaît que quand un conteneur
   défile dans les deux sens — donc jamais pendant qu'on dessine l'interface, et
   toujours chez qui a agrandi la sienne.
+- **Un réordonnancement par glisser se trompe d'un cran.** L'indice de dépôt est
+  celui VU À L'ÉCRAN ; retirer l'élément raccourcit la liste devant lui, donc
+  tout indice situé après sa position d'origine glisse d'un cran. Sans la
+  correction, déplacer un onglet vers la droite dans son propre emplacement le
+  posait une place trop loin (`movePanel`, `layout.js`).
+- **`dragend` part toujours, `drop` non.** Ce qui n'est affiché que pendant un
+  glisser (les zones de dépôt des emplacements vides) doit se retirer sur
+  `dragend` : un geste annulé par Échap ou lâché dans le vide ne produit aucun
+  `drop`, et les bandes restaient à l'écran.
 - **Le verrou `session.lock` n'est détectable que sur Windows.** Ailleurs il est
   consultatif et une ouverture réussie ne prouve rien. `probeWorldLock` renvoie
   `{ locked, reliable }` : ne jamais réduire ça à un booléen, ce serait

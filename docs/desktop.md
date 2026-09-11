@@ -1698,6 +1698,106 @@ mélangé passerait les tests de rejouabilité et produirait quand même des ban
 
 ---
 
+## Panneaux déplaçables
+
+L'interface avait sa disposition écrite dans `App.jsx` : inspecteur en haut à
+droite, palette en dessous, et rien d'autre. C'est une disposition raisonnable
+— ce n'est pas une raison pour l'imposer. Selon qu'on retouche un mur au
+pinceau ou qu'on relit le journal d'un gros build, ce qu'on veut sous les yeux
+n'est pas le même panneau, ni au même endroit.
+
+Les panneaux se déplacent donc **comme les onglets d'un navigateur** : on
+attrape l'onglet, on le lâche ailleurs, il s'y range. Quatre emplacements — à
+gauche, à droite en haut, à droite en bas, en bas sous la vue — et quatre
+panneaux : **Inspecteur**, **Palette de blocs**, **Performances**, **Journal**.
+Les deux derniers sont nouveaux : le relevé existait en panneau flottant, le
+journal n'avait pas de vue du tout alors que le moteur l'écrivait déjà.
+
+**La disposition s'enregistre toute seule**, à chaque geste. Un bouton
+« enregistrer la disposition » est un bouton qu'on oublie de cliquer, et
+retrouver son interface défaite au lancement suivant est exactement ce qu'on ne
+veut pas.
+
+### Le modèle est pur, le DOM ne décide de rien
+
+`renderer/layout.js` ne connaît que des identifiants : quels panneaux existent,
+quels emplacements, qui est où, dans quel ordre, et lequel est visible. Aucun
+React, aucun DOM — donc testable en entier (16 cas), y compris les situations
+qu'on ne sait pas produire à la main : un fichier de réglages bricolé, un
+panneau retiré du code, un panneau ajouté après coup.
+
+Sa règle tient en une phrase : **on ne perd jamais un panneau**. `normalizeLayout`
+jette les identifiants inconnus, déduplique, et **remet ce qui manque à sa
+place d'origine**. Un panneau qui disparaît de l'interface sans moyen de le
+faire revenir est une fonctionnalité perdue, et personne ne pense à aller
+éditer un JSON pour la retrouver.
+
+### Le décalage d'un cran
+
+`movePanel(layout, panneau, emplacement, indice)` prend l'indice **vu à
+l'écran** : celui de l'onglet sur lequel on lâche, dans la liste telle qu'elle
+est affichée. C'est ce dont dispose l'interface, et c'est ce qu'un utilisateur
+croit faire — « pose-le là où est celui-ci ».
+
+D'où une correction qui n'a l'air de rien : retirer le panneau raccourcit la
+liste devant lui, donc tout indice situé **après** sa position d'origine glisse
+d'un cran. Sans ça, déplacer un onglet vers la droite dans son propre
+emplacement le pose systématiquement une place trop loin. C'est le défaut
+classique de tout réordonnancement par glisser, et ce module l'avait au premier
+jet ; un test l'exige maintenant dans les deux sens.
+
+### Un emplacement vide n'existe pas, et c'est un problème
+
+Un emplacement sans panneau ne monte pas : garder une colonne de 20 % de large
+et vide, c'est reprendre d'une main la place qu'on vient de rendre. Mais ce qui
+n'est pas dans le DOM ne peut rien recevoir — la gauche, une fois vidée,
+serait inaccessible à jamais.
+
+Les emplacements vides réapparaissent donc en **bordure du viewport, le temps
+d'un glisser**, et seulement là. Le drapeau qui les déclenche est posé au
+`dragstart` et retiré au `dragend` — `dragend` et pas `drop`, parce qu'il part
+toujours, y compris quand le geste est annulé par Échap ou lâché dans le vide.
+
+### Le transport passe par `dataTransfer`
+
+Et non par un état global : c'est le mécanisme du navigateur, il survit au
+passage d'un conteneur à l'autre, et il donne gratuitement le curseur
+« déplacer » et l'annulation par Échap. Le type MIME est à nous
+(`application/x-titi-panel`), ce qui permet aussi de **distinguer un onglet
+déplacé d'un fichier déposé** : sans ce filtre, le voile « Déposer pour
+ouvrir » s'affichait dès qu'on attrapait un onglet, et proposait d'ouvrir un
+fichier qui n'existe pas.
+
+### Deux tables qui pouvaient diverger
+
+`layout.js` déclare les panneaux ; `App.jsx` dit ce que chacun affiche. Ajouter
+un panneau sans son entrée donnait un onglet qui s'ouvre sur du vide, sans la
+moindre erreur. Deux tests le refusent désormais : l'un exige un composant pour
+chaque panneau, l'autre que son icône soit bien réexportée par
+`shell/icons.js` — un nom absent valait `undefined`, et le repli prenait la
+main en silence.
+
+### Le titre écrit deux fois
+
+Chaque panneau avait sa barre de titre : une icône, son nom, un chiffre à
+droite. Une fois les panneaux rangés en onglets, ce nom était écrit **deux
+fois**, l'un au-dessus de l'autre, pour trente pixels de hauteur perdus par
+panneau. L'onglet garde le nom ; le chiffre — le nombre de blocs, les images
+par seconde, l'outil en cours — remonte au bout de la barre d'onglets par un
+portail (`shell/dockSlot.js`), sur le modèle de `ActionSlot`. C'est le panneau
+qui connaît la valeur, mais la barre qui a la place de l'afficher.
+
+### Vérifié par un vrai glisser
+
+`TITI_SCREENSHOT_DOCK="palette|left"` envoie de **vrais `DragEvent`** portant un
+vrai `DataTransfer` sur les vrais éléments, puis capture. Le chemin exercé est
+celui de la souris, pas un crochet de test qui pourrait mentir sur ce que fait
+le geste. Deux captures l'attestent : les bordures de dépôt pendant le glisser,
+et la palette rangée à gauche après. La disposition relue au lancement suivant
+est celle qu'on a laissée.
+
+---
+
 ## Écarts assumés avec le moteur du site
 
 | Sujet | Site | Ici | Pourquoi |

@@ -10,9 +10,24 @@ import ToolWheel from './shell/ToolWheel.jsx';
 import WorldPicker from './shell/WorldPicker.jsx';
 import Settings from './shell/Settings.jsx';
 import PerfPanel from './shell/PerfPanel.jsx';
+import AuditPanel from './shell/AuditPanel.jsx';
+import Dock, { DropZone, PANEL_DRAG_TYPE } from './shell/Dock.jsx';
 import Viewport from './viewport/Viewport.jsx';
 import { useApp } from './store.js';
+import { ZONES, sidesUsed, zoneUsed } from './layout.js';
 import { actionForEvent } from './keys.js';
+
+/**
+ * Ce qu'un onglet affiche. La seule table qui relie un identifiant de panneau à
+ * son composant — `layout.js` reste pur et ne connaît que des identifiants,
+ * sans quoi il ne serait plus testable sans DOM.
+ */
+const PANNEAUX = {
+  inspector: () => <Inspector />,
+  palette: () => <BlockPalette />,
+  perf: () => <PerfPanel docked />,
+  audit: () => <AuditPanel />,
+};
 
 export default function App() {
   const geometry = useApp((s) => s.geometry);
@@ -37,6 +52,8 @@ export default function App() {
   const tool = useApp((s) => s.tool);
   const brush = useApp((s) => s.brush);
   const applyStroke = useApp((s) => s.applyStroke);
+  const layout = useApp((s) => s.layout);
+  const dragging = useApp((s) => s.dragging);
   const [dropping, setDropping] = useState(false);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -51,9 +68,14 @@ export default function App() {
   // quoi en faire. Un renderer sans accès disque le reste.
   useEffect(() => {
     const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
-    const onOver = (e) => { stop(e); setDropping(true); };
-    const onLeave = (e) => { stop(e); if (e.relatedTarget === null) setDropping(false); };
+    // Un onglet qu'on déplace est aussi un glisser-déposer. Sans ce filtre, le
+    // voile « Déposer pour ouvrir » s'affichait dès qu'on attrapait un onglet —
+    // et proposait d'ouvrir un fichier qui n'existe pas.
+    const interne = (e) => !!e.dataTransfer?.types?.includes(PANEL_DRAG_TYPE);
+    const onOver = (e) => { if (interne(e)) return; stop(e); setDropping(true); };
+    const onLeave = (e) => { if (interne(e)) return; stop(e); if (e.relatedTarget === null) setDropping(false); };
     const onDrop = (e) => {
+      if (interne(e)) return;
       stop(e);
       setDropping(false);
       const file = e.dataTransfer?.files?.[0];
@@ -115,6 +137,12 @@ export default function App() {
   const minY = geometry?.min.y ?? 0;
   const maxY = geometry ? geometry.min.y + geometry.size.y - 1 : 0;
 
+  // Un côté vidé de ses panneaux ne monte plus : garder une colonne de 20 % de
+  // large et vide, c'est reprendre d'une main la place qu'on vient de rendre.
+  const cotes = sidesUsed(layout);
+  const occupe = (z) => zoneUsed(layout, z);
+  const rendrePanneau = (id) => (PANNEAUX[id] ? PANNEAUX[id]() : null);
+
   return (
     <div className="shell">
       <TitleBar />
@@ -123,86 +151,128 @@ export default function App() {
         <ToolRail />
 
         <PanelGroup direction="horizontal" autoSaveId="titi-layout">
-          <Panel defaultSize={76} minSize={40}>
-            <div className="viewport">
-              {geometry
-                ? (
-                  <Viewport
-                    geometry={geometry}
-                    layerY={layerY}
-                    onStats={setStats}
-                    // Le pinceau n'est armé que quand son outil est choisi :
-                    // sinon le clic gauche sert à tourner la caméra.
-                    brush={tool === 'brush' && project ? { ...brush, limits: project.limits } : null}
-                    onStroke={applyStroke}
-                  />
-                )
-                : <Empty onOpen={open} onOpenWorld={openWorld} />}
+          {cotes.has('left') && (
+            <>
+              <Panel defaultSize={20} minSize={14} maxSize={40} order={1}>
+                <div className="side" style={{ height: '100%' }}>
+                  <Dock zone="left">{rendrePanneau}</Dock>
+                </div>
+              </Panel>
+              <PanelResizeHandle className="handle" />
+            </>
+          )}
 
-              {project && (
-                <>
-                  <div className="hud hud-tl">
-                    <span className="chip"><b>{project.name}</b></span>
-                    <span className="chip">
-                      {project.size.x} × {project.size.y} × {project.size.z}
-                    </span>
-                    {project.pending && <span className="chip" data-tone="select">Modifications non exportées</span>}
-                  </div>
-
-                  <div className="hud hud-bl">
-                    <span className="chip">Molette pour zoomer · glisser pour pivoter · <b>ZQSD</b> pour voler</span>
-                    <span className="chip">Maintiens <b>Espace</b> pour la roue d’outils</span>
-                  </div>
-
-                  {geometry && (
-                    <div className="layer-slider">
-                      <span className="chip" style={{ padding: '0 6px' }} title="Couche Y affichée">
-                        <Layers3 size={11} />
-                      </span>
-                      <input
-                        type="range"
-                        min={minY}
-                        max={maxY}
-                        value={layerY ?? maxY}
-                        onChange={(e) => setLayerY(Number(e.target.value))}
-                        aria-label="Couche Y affichée"
+          <Panel defaultSize={76} minSize={40} order={2}>
+            <PanelGroup direction="vertical" autoSaveId="titi-centre">
+              <Panel defaultSize={70} minSize={25} order={1} id="vp">
+                <div className="viewport">
+                  {geometry
+                    ? (
+                      <Viewport
+                        geometry={geometry}
+                        layerY={layerY}
+                        onStats={setStats}
+                        // Le pinceau n'est armé que quand son outil est choisi :
+                        // sinon le clic gauche sert à tourner la caméra.
+                        brush={tool === 'brush' && project ? { ...brush, limits: project.limits } : null}
+                        onStroke={applyStroke}
                       />
-                      <span className="chip" style={{ padding: '0 7px' }}>{layerY ?? maxY}</span>
+                    )
+                    : <Empty onOpen={open} onOpenWorld={openWorld} />}
+
+                  {project && (
+                    <>
+                      <div className="hud hud-tl">
+                        <span className="chip"><b>{project.name}</b></span>
+                        <span className="chip">
+                          {project.size.x} × {project.size.y} × {project.size.z}
+                        </span>
+                        {project.pending && <span className="chip" data-tone="select">Modifications non exportées</span>}
+                      </div>
+
+                      <div className="hud hud-bl">
+                        <span className="chip">Molette pour zoomer · glisser pour pivoter · <b>ZQSD</b> pour voler</span>
+                        <span className="chip">Maintiens <b>Espace</b> pour la roue d’outils</span>
+                      </div>
+
+                      {geometry && (
+                        <div className="layer-slider">
+                          <span className="chip" style={{ padding: '0 6px' }} title="Couche Y affichée">
+                            <Layers3 size={11} />
+                          </span>
+                          <input
+                            type="range"
+                            min={minY}
+                            max={maxY}
+                            value={layerY ?? maxY}
+                            onChange={(e) => setLayerY(Number(e.target.value))}
+                            aria-label="Couche Y affichée"
+                          />
+                          <span className="chip" style={{ padding: '0 7px' }}>{layerY ?? maxY}</span>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  <PerfPanel />
+
+                  <ToolWheel />
+
+                  {dropping && (
+                    <div className="drop-veil">
+                      <div className="drop-card">
+                        <FolderOpen size={26} strokeWidth={1.3} />
+                        <b>Déposer pour ouvrir</b>
+                        <span>.mca · dossier region/ zippé · .schem · .litematic</span>
+                      </div>
                     </div>
                   )}
-                </>
-              )}
 
-              <PerfPanel />
-
-              <ToolWheel />
-
-              {dropping && (
-                <div className="drop-veil">
-                  <div className="drop-card">
-                    <FolderOpen size={26} strokeWidth={1.3} />
-                    <b>Déposer pour ouvrir</b>
-                    <span>.mca · dossier region/ zippé · .schem · .litematic</span>
-                  </div>
+                  {/* Les emplacements VIDES n'existent pas dans la mise en page :
+                      ils ne tiendraient qu'une bande grise. Ils réapparaissent en
+                      bordure du viewport le temps d'un glisser, et seulement là —
+                      sinon la gauche, une fois vidée, serait inaccessible à jamais. */}
+                  {dragging && ZONES.filter((z) => !occupe(z.id)).map((z) => (
+                    <DropZone key={z.id} zone={z.id} dragging />
+                  ))}
                 </div>
+              </Panel>
+
+              {/* En bas, sous le viewport et pleine largeur : la place d'un
+                  journal ou d'un relevé, qu'on veut large et pas haut. */}
+              {occupe('bottom') && <PanelResizeHandle className="handle" />}
+              {occupe('bottom') && (
+                <Panel defaultSize={30} minSize={12} order={2} id="bt">
+                  <div className="side" style={{ height: '100%' }}>
+                    <Dock zone="bottom">{rendrePanneau}</Dock>
+                  </div>
+                </Panel>
               )}
-            </div>
+            </PanelGroup>
           </Panel>
 
-          <PanelResizeHandle className="handle" />
-
-          <Panel defaultSize={24} minSize={16} maxSize={40}>
-            <div className="side" style={{ height: '100%' }}>
-              <PanelGroup direction="vertical" autoSaveId="titi-side">
-                {/* L'inspecteur d'abord : c'est la surface de travail. Une
-                    opération à plusieurs paramètres — « Mélange » et ses lignes
-                    de blocs — y tient sans défiler. */}
-                <Panel defaultSize={66} minSize={20}><Inspector /></Panel>
-                <PanelResizeHandle className="handle" />
-                <Panel defaultSize={34} minSize={18}><BlockPalette /></Panel>
-              </PanelGroup>
-            </div>
-          </Panel>
+          {cotes.has('right') && <PanelResizeHandle className="handle" />}
+          {cotes.has('right') && (
+            <Panel defaultSize={24} minSize={16} maxSize={40} order={3}>
+              <div className="side" style={{ height: '100%' }}>
+                <PanelGroup direction="vertical" autoSaveId="titi-side">
+                  {/* L'inspecteur d'abord par défaut : c'est la surface de
+                      travail. Mais tout se déplace — c'est le point. */}
+                  {occupe('rightTop') && (
+                    <Panel defaultSize={66} minSize={20} order={1} id="rt">
+                      <Dock zone="rightTop">{rendrePanneau}</Dock>
+                    </Panel>
+                  )}
+                  {occupe('rightTop') && occupe('rightBottom') && <PanelResizeHandle className="handle" />}
+                  {occupe('rightBottom') && (
+                    <Panel defaultSize={34} minSize={18} order={2} id="rb">
+                      <Dock zone="rightBottom">{rendrePanneau}</Dock>
+                    </Panel>
+                  )}
+                </PanelGroup>
+              </div>
+            </Panel>
+          )}
         </PanelGroup>
       </div>
 
