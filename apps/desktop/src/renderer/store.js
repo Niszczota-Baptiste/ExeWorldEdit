@@ -22,14 +22,23 @@ export const TOOLS = [
   { id: 'library', label: 'Bibliothèque', icon: 'Library', key: 'L' },
 ];
 
-/** Les opérations que chaque outil met en avant dans l'inspecteur. */
+/**
+ * Les opérations que chaque outil met en avant dans l'inspecteur.
+ *
+ * Un test (`test/store.test.js`) exige que TOUTE opération déclarée par le
+ * moteur figure ici. Sans lui, `biome`, `copy` et `paste` étaient déclarées,
+ * branchées, testées — et inatteignables : aucun outil ne les proposait et
+ * aucun raccourci ne les appelait.
+ */
 export const TOOL_OPS = {
   transform: ['mirror', 'rotate', 'translate', 'stack', 'scale', 'mirrorcopy'],
   blocks: ['set', 'replace', 'mix', 'walls', 'faces', 'hollow', 'overlay', 'drain', 'cut'],
   shapes: ['sphere', 'cyl', 'pyramid', 'cone', 'line'],
-  terrain: ['terrain', 'naturalize', 'smooth', 'erode', 'dilate'],
+  terrain: ['terrain', 'naturalize', 'smooth', 'erode', 'dilate', 'biome'],
   path: ['path'],
-  select: [],
+  // L'outil de sélection porte le presse-papier : c'est là qu'on a une zone
+  // sous la main et rien d'autre à en faire.
+  select: ['copy', 'paste'],
 };
 
 export const useApp = create((set, get) => ({
@@ -361,29 +370,63 @@ export const useApp = create((set, get) => ({
  * Les codes du moteur deviennent des phrases qui disent QUOI FAIRE. Afficher
  * `selection_too_large` à un utilisateur, c'est lui laisser deviner.
  */
-function errorText(e, context) {
+export function errorText(e, context) {
   const code = String(e?.message || '').replace(/^Error:\s*/, '');
-  const table = {
-    out_of_bounds: 'La sélection sort du build. Réduis-la ou étends l’emprise.',
-    selection_too_large: 'Sélection trop grande pour cette opération. Découpe-la en plusieurs passes.',
-    invalid_selection: 'Sélection incomplète : vérifie les deux coins.',
-    nothing_to_undo: 'Rien à annuler.',
-    nothing_to_redo: 'Rien à rétablir.',
-    empty_clipboard: 'Le presse-papier est vide. Copie d’abord une zone.',
-    no_source: 'Ce projet n’a plus de fichier source.',
-    too_many_blocks: 'Zone trop dense pour être affichée d’un coup. Réduis la sélection.',
-    empty_box: 'La zone ne contient aucun bloc.',
-    unknown_operation: `Opération inconnue : ${context}.`,
-    world_busy: 'Ce monde est ouvert dans Minecraft. Ferme le jeu, puis réessaie.',
-    lock_unverifiable: 'Impossible de vérifier si Minecraft tient ce monde. Ferme le jeu avant d’appliquer.',
-    no_world: 'Ce projet ne vient pas d’un dossier de monde : rien où l’appliquer.',
-    not_a_world: 'Ce dossier n’est ni une save ni un dossier region/.',
-    no_region_dir: 'Ce monde n’a pas de dossier region/.',
-    no_region: 'Ce dossier ne contient aucun fichier de région.',
-    no_area: 'Aucune zone demandée : choisis les régions à ouvrir.',
-    empty_area: 'Cette zone n’a jamais été générée dans ce monde.',
-    bad_schematic: 'Ce fichier n’est pas un schematic lisible.',
-    region_coords_unknown: 'Impossible de situer cette région : ni son nom ni son contenu ne le disent. Ce fichier n’est peut-être pas un .mca valide.',
-  };
-  return table[code] || `Échec de ${context} : ${code}`;
+  return ERREURS[code] || `Échec de ${context} : ${code}`;
 }
+
+/**
+ * Table complète des codes du moteur. Un test (`test/store.test.js`) relit les
+ * `new Error('…')` de `packages/we-engine/src` et exige que chacun soit ici :
+ * un code oublié s'affiche tel quel à l'utilisateur, en anglais et en
+ * snake_case.
+ */
+export const ERREURS = {
+  out_of_bounds: 'La sélection sort du build. Réduis-la ou étends l’emprise.',
+  selection_too_large: 'Sélection trop grande pour cette opération. Découpe-la en plusieurs passes.',
+  invalid_selection: 'Sélection incomplète : vérifie les deux coins.',
+  nothing_to_undo: 'Rien à annuler.',
+  nothing_to_redo: 'Rien à rétablir.',
+  empty_clipboard: 'Le presse-papier est vide. Copie d’abord une zone.',
+  no_source: 'Ce projet n’a plus de fichier source.',
+  too_many_blocks: 'Zone trop dense pour être affichée d’un coup. Réduis la sélection.',
+  scale_result_too_large: 'Le résultat dépasse 8 millions de blocs. Baisse le facteur, ou réduis la sélection.',
+  // Refus du NORMALISEUR. Ils remontent jusqu'ici depuis que toute opération
+  // passe par lui : un champ mal rempli doit dire lequel, pas « bad_block ».
+  bad_block: 'Nom de bloc invalide. Attendu « namespace:identifiant », par exemple minecraft:stone.',
+  bad_pattern: 'Le mélange est vide : ajoute au moins un bloc avec une part supérieure à 0.',
+  bad_biome: 'Nom de biome invalide. Attendu « namespace:identifiant », par exemple minecraft:plains.',
+  bad_axis: 'Axe invalide : choisis X, Y ou Z.',
+  bad_degrees: 'Angle invalide : 90, 180 ou 270.',
+  bad_offset: 'Décalage invalide : trois nombres entiers attendus.',
+  bad_direction: 'Direction invalide.',
+  bad_factor: 'Facteur d’échelle invalide.',
+  bad_panel: 'Panneau invalide : le masque ne couvre pas toute la zone.',
+  biome_unsupported: 'Ce build ne porte pas de données de biome.',
+  empty_box: 'La zone ne contient aucun bloc.',
+  unknown_operation: 'Opération inconnue : le moteur ne la connaît pas.',
+  world_busy: 'Ce monde est ouvert dans Minecraft. Ferme le jeu, puis réessaie.',
+  lock_unverifiable: 'Impossible de vérifier si Minecraft tient ce monde. Ferme le jeu avant d’appliquer.',
+  no_world: 'Ce projet ne vient pas d’un dossier de monde : rien où l’appliquer.',
+  not_a_world: 'Ce dossier n’est ni une save ni un dossier region/.',
+  no_region_dir: 'Ce monde n’a pas de dossier region/.',
+  no_region: 'Ce dossier ne contient aucun fichier de région.',
+  no_area: 'Aucune zone demandée : choisis les régions à ouvrir.',
+  empty_area: 'Cette zone n’a jamais été générée dans ce monde.',
+  bad_schematic: 'Ce fichier n’est pas un schematic lisible.',
+  region_coords_unknown: 'Impossible de situer cette région : ni son nom ni son contenu ne le disent. Ce fichier n’est peut-être pas un .mca valide.',
+  bad_replace: 'Remplacement invalide : choisis au moins un bloc source et un bloc cible.',
+  bad_plane: 'Cette sélection n’est pas un plan : un panneau demande une zone plate d’un bloc d’épaisseur.',
+  empty_plane: 'Le plan est vide.',
+  bad_heightmap: 'Relief invalide : les hauteurs ne couvrent pas toute la zone.',
+  bad_preview: 'Aperçu illisible. Relance l’opération pour le régénérer.',
+  bad_litematic: 'Ce fichier .litematic est illisible.',
+  zip_invalid: 'Archive zip illisible ou sans fichier de région.',
+  empty_seed: 'Aucune région à installer.',
+  invalid_blank: 'Dimensions de build invalides.',
+  invalid_project_id: 'Identifiant de projet invalide.',
+  library_full: 'La bibliothèque est pleine : supprime une entrée avant d’en ranger une autre.',
+  world_too_big: 'Ce monde est trop grand pour être ouvert d’un coup. Choisis une zone plus petite.',
+  not_found: 'Projet introuvable.',
+  operation_non_parallelisable: 'Cette opération ne se découpe pas par région.',
+};

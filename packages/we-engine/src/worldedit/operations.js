@@ -378,7 +378,11 @@ export function normalizeParams(operation, raw = {}) {
         style, palette,
         seed: num(raw.seed) || 0,
         scale: Math.max(0, Math.min(256, num(raw.scale) || 0)),
-        amplitude: Number.isFinite(amp) ? Math.max(0, Math.min(100, amp)) / 100 : 1,
+        // POURCENTAGE, comme le dit son étiquette — la conversion en rapport
+        // est l'affaire de l'opération. La faire ici rendait le normaliseur
+        // non idempotent (0,7 renormalisé donnait 1 %), donc impossible à
+        // placer sur le chemin de toutes les opérations.
+        amplitude: Number.isFinite(amp) ? Math.max(0, Math.min(100, amp)) : 100,
         clearAbove: raw.clearAbove !== false && raw.clearAbove !== 'false',
       };
       if (palette === 'custom') {
@@ -396,9 +400,14 @@ export function normalizeParams(operation, raw = {}) {
 
 // { name, states? } — name doit ressembler à « namespace:id » (vanilla ou
 // minefield), states est un dictionnaire de chaînes optionnel.
+//
+// Accepte aussi une CHAÎNE nue. Pas par laxisme : `naturalize`/`terrain`
+// personnalisés rendent leurs blocs en chaînes (`normBlock(...)?.name`), donc
+// sans ça renormaliser une sortie du normaliseur les remettait à `null` — les
+// blocs choisis disparaissaient au second passage, sans un mot.
 function normBlock(b) {
   if (!b) return null;
-  const name = String(b.name || '').trim().toLowerCase();
+  const name = String((typeof b === 'string' ? b : b.name) || '').trim().toLowerCase();
   if (!/^[a-z0-9_]+:[a-z0-9_/.]+$/.test(name)) return null;
   let states = null;
   if (b.states && typeof b.states === 'object') {

@@ -959,7 +959,7 @@ test('une opération colonne-locale sur plusieurs régions passe par les fils, e
   staging.seedRegions('par', seed());
 
   const selection = sel({ x: 0, y: 40, z: 0 }, { x: 1023, y: 110, z: 127 });
-  const params = { style: 'collines', amplitude: 0.7, scale: 0, seed: 7, palette: 'plains', clearAbove: true };
+  const params = { style: 'collines', amplitude: 70, scale: 0, seed: 7, palette: 'plains', clearAbove: true };
 
   const res = await staging.applyOperation({
     project: adapter.getProject('par'), operation: 'terrain', params, selection, actor: 't',

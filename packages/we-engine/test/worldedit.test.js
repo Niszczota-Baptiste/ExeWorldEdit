@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { ECHANTILLONS_UI } from './fixtures/ui-params.js';
 import assert from 'node:assert/strict';
 import { transformProperties, isYMirrorSafe, __test } from '../src/worldedit/blockstates.js';
 import {
@@ -663,10 +664,43 @@ test('terrain : deux exécutions à seed égale donnent le même relief ET la m�
   const run = async () => {
     const vol = new MemoryVolume();
     const sel = { min: { x: 0, y: 0, z: 0 }, max: { x: 23, y: 23, z: 23 } };
-    await opTerrain(vol, sel, { style: 'collines', seed: 99, amplitude: 1, palette: 'mountain' });
+    await opTerrain(vol, sel, { style: 'collines', seed: 99, amplitude: 100, palette: 'mountain' });
     return fingerprint(vol, sel);
   };
   assert.equal(await run(), await run());
+});
+
+test('le normaliseur est IDEMPOTENT sur chaque opération', async () => {
+  // Il est branché sur le chemin de TOUTE opération (`applyOperation`), donc il
+  // peut voir des paramètres déjà normalisés : un appelant qui normalise de son
+  // côté, un rejeu depuis le journal, un futur hôte. S'il n'est pas idempotent,
+  // ce second passage abîme en silence — mesuré avant correction : l'amplitude
+  // de `terrain` tombait de 70 % à 1 %, et les blocs personnalisés de
+  // `naturalize` revenaient à `null`.
+  const { OPERATIONS, normalizeParams } = await import('../src/worldedit/operations.js');
+  for (const op of OPERATIONS) {
+    const brut = ECHANTILLONS_UI[op.id];
+    assert.ok(brut, `${op.id} : pas d’échantillon — une opération ajoutée sans être testée ici`);
+    const une = normalizeParams(op.id, brut);
+    assert.equal(typeof une, 'object', `${op.id} : le normaliseur refuse un échantillon d’interface valide (${une})`);
+    const deux = normalizeParams(op.id, une);
+    assert.deepEqual(deux, une, `${op.id} : renormaliser change le résultat`);
+  }
+});
+
+test('chaque paramètre déclaré survit au normaliseur', async () => {
+  // Le piège déjà rencontré : `normalizeParams` ne recopie que ce qu'il NOMME,
+  // et un cas de sortie qui en oublie un le fait disparaître entre le champ de
+  // l'interface et l'opération, sans erreur.
+  const { OPERATIONS, normalizeParams } = await import('../src/worldedit/operations.js');
+  for (const op of OPERATIONS) {
+    const out = normalizeParams(op.id, ECHANTILLONS_UI[op.id]);
+    for (const p of op.params) {
+      // Un champ conditionnel non montré n'a pas à ressortir.
+      if (p.showIf && !Object.entries(p.showIf).every(([k, v]) => ECHANTILLONS_UI[op.id][k] === v)) continue;
+      assert.ok(p.name in out, `${op.id}.${p.name} : déclaré dans le descripteur, jeté par le normaliseur`);
+    }
+  }
 });
 
 // Le descripteur, le normaliseur et l'opération sont TROIS endroits distincts.

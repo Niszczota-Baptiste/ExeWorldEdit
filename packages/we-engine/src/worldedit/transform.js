@@ -641,7 +641,11 @@ export async function opTerrain(vol, sel, params = {}, ctx) {
   const style = TERRAIN_STYLES[params.style] || TERRAIN_STYLES.collines;
   const seed = Number.isFinite(params.seed) ? (params.seed | 0) : 1337;
   const scale = Math.max(4, Math.min(256, params.scale || style.scale));
-  const ampMul = Number.isFinite(params.amplitude) ? Math.max(0, Math.min(1, params.amplitude)) : 1;
+  // `amplitude` est un POURCENTAGE (0..100), comme l'annonce le descripteur.
+  // Elle valait un rapport 0..1, et le serrage silencieux rendait « 70 » et
+  // « 95 » identiques à 100 % : la démo et le bench demandaient un relief
+  // qu'ils n'ont jamais eu.
+  const ampMul = Number.isFinite(params.amplitude) ? Math.max(0, Math.min(100, params.amplitude)) / 100 : 1;
   const clearAbove = params.clearAbove !== false;
   const palKey = (params.palette && params.palette !== 'match') ? params.palette : style.palette;
   const auto = palKey === 'auto';
@@ -784,13 +788,22 @@ export function opSmooth(vol, sel, { iterations } = {}) {
 // retire les blocs entièrement enfermés (tous voisins pleins) → ne garde que la
 // COQUE extérieure. Évite de transformer chaque bloc en masse pleine N³ : on
 // agrandit la structure mais on ne garde que les blocs « les plus à l'extérieur ».
+//
+// Plafond du RÉSULTAT : × 6 sur une sélection de 40 × 24 × 40 en demande 8,3
+// millions. C'est un garde-fou de mémoire (le volume échantillonné est
+// matérialisé), pas une préférence — d'où un plafond en dur et non un réglage.
+export const SCALE_MAX_BLOCKS = 8_000_000;
+
 export function opScale(vol, sel, { factor, hollow = false }) {
   const f = factor;
   const src = readSelection(vol, sel);
   const nsx = Math.max(1, Math.round(src.sx * f));
   const nsy = Math.max(1, Math.round(src.sy * f));
   const nsz = Math.max(1, Math.round(src.sz * f));
-  if (nsx * nsy * nsz > 8_000_000) throw new Error('too_many_blocks');
+  // Code DISTINCT de `too_many_blocks` : là, c'est le RÉSULTAT qui déborde, pas
+  // l'affichage. Les deux messages ne disent pas la même chose à faire — l'un
+  // demande de réduire la sélection, l'autre de baisser le facteur.
+  if (nsx * nsy * nsz > SCALE_MAX_BLOCKS) throw new Error('scale_result_too_large');
   const sampled = (i, j, k) => src.get(
     Math.min(src.sx - 1, Math.floor(i / f)),
     Math.min(src.sy - 1, Math.floor(j / f)),

@@ -60,13 +60,13 @@ console.log(`Build de démonstration ${SIZE}×${SIZE}, seed ${SEED}`);
 
 // ── Le relief ───────────────────────────────────────────────────────────────
 await step('Relief (collines)', 'terrain', {
-  style: 'hills', amplitude: 70, scale: 0, seed: SEED, palette: 'plains', clearAbove: true,
+  style: 'collines', amplitude: 70, scale: 0, seed: SEED, palette: 'plains', clearAbove: true,
 }, box({ x: 0, y: BASE_Y, z: 0 }, { x: SIZE - 1, y: TOP_Y, z: SIZE - 1 }));
 
 // Un massif rocheux dans un coin : deux styles de terrain sur le même build,
 // c'est ce qui donne une silhouette au lieu d'une bosse uniforme.
 await step('Massif rocheux', 'terrain', {
-  style: 'mountain', amplitude: 95, scale: 0, seed: SEED + 7, palette: 'mountain', clearAbove: false,
+  style: 'montagne', amplitude: 95, scale: 0, seed: SEED + 7, palette: 'mountain', clearAbove: false,
 }, box({ x: 108, y: BASE_Y, z: 8 }, { x: SIZE - 1, y: TOP_Y, z: 92 }));
 
 await step('Naturaliser (plaine)', 'naturalize', { preset: 'plains' },

@@ -17,6 +17,7 @@ import {
   opLine, opPyramid, opCone, opErode, opDilate, opDrain, opBiome, opPath, opTerrain,
   MaskedVolume, sameBlock,
 } from '../worldedit/transform.js';
+import { normalizeParams } from '../worldedit/operations.js';
 import {
   DEFAULT_LIMITS, normalizeLimits, fdiv, buildExtent, buildLimits, scanLimits, validateSelection,
   clampBBox, unionBBox, regionKeysForBBox, panelPlane, weightedPicker,
@@ -428,6 +429,22 @@ export function createStaging(adapter, options = {}) {
    */
   async function applyOperation({ project, operation, params, selection, actor, clipboard, onProgress }) {
     const startedAt = Date.now();
+    // NORMALISATION — le maillon du milieu, et le seul endroit où il vive.
+    //
+    // Le descripteur génère l'interface, le normaliseur valide et met en forme,
+    // l'opération exécute. L'application appelait le premier et le troisième et
+    // sautait le second : les champs `block` de l'inspecteur arrivaient en
+    // `{ name }` là où l'opération attend une chaîne, et « Personnalisé »
+    // (naturalize, terrain) plantait sur `s.includes is not a function`. Le
+    // brancher ICI plutôt que dans l'application vaut pour TOUT hôte — c'est
+    // le moteur qui connaît la forme de ses propres paramètres.
+    //
+    // Idempotent par construction : renormaliser une sortie du normaliseur rend
+    // la même chose (un test l'exige), donc un appelant qui normalise déjà ne
+    // casse rien.
+    const clean = normalizeParams(operation, params || {});
+    if (typeof clean === 'string') throw new Error(clean);
+    params = clean;
     // Le chronomètre suit les mêmes phases que la barre de progression : ce que
     // l'utilisateur voit défiler est exactement ce qui est mesuré.
     const timer = phaseTimer();

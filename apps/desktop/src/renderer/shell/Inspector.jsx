@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { Play, Settings2, Undo2, Redo2, FileDown, Globe, AlertTriangle } from './icons.js';
+import { Play, Settings2, Undo2, Redo2, FileDown, Globe, AlertTriangle, Plus, Minus } from './icons.js';
 import { OPERATIONS } from '@titi/we-engine/operations';
 import { useApp, TOOL_OPS, TOOLS } from '../store.js';
 
@@ -36,8 +36,25 @@ export default function Inspector() {
     const out = {};
     for (const p of spec.params || []) {
       const v = values[`${operation}.${p.name}`] ?? p.default;
-      if (p.type === 'block') out[p.name] = { name: v || block };
-      else if (v !== undefined && v !== '') out[p.name] = p.type === 'int' ? Number(v) : v;
+      switch (p.type) {
+        case 'block': out[p.name] = { name: v || block }; break;
+        // Les trois types COMPOSITES. Ils étaient déclarés par le moteur et
+        // n'avaient aucun champ ici : le `Field` par défaut rendait une simple
+        // case de texte, dont la chaîne partait telle quelle vers une opération
+        // qui attend un tableau. « Remplacer » et « Mélange » — deux des
+        // commandes les plus utilisées — ne pouvaient pas fonctionner.
+        case 'blocklist':
+          out[p.name] = (v?.length ? v : [block]).filter(Boolean).map((name) => ({ name }));
+          break;
+        case 'pattern':
+          out[p.name] = (v?.length ? v : [{ name: block, weight: 100 }])
+            .filter((e) => e?.name)
+            .map((e) => ({ name: e.name, weight: Number(e.weight) || 1 }));
+          break;
+        case 'mask': out[p.name] = v || { type: 'all' }; break;
+        default:
+          if (v !== undefined && v !== '') out[p.name] = p.type === 'int' ? Number(v) : v;
+      }
     }
     return out;
   }, [spec, values, operation, block]);
@@ -179,8 +196,104 @@ function Head({ icon, title, extra }) {
   );
 }
 
+/** Masques proposés par le moteur (`MASK_TYPES`, operations.js). */
+const MASKS = [
+  ['all', 'Tout'],
+  ['air', 'Air seulement'],
+  ['solid', 'Blocs pleins seulement'],
+  ['exposed', 'Exposé à l’air'],
+  ['on_surface', 'Surface de chaque colonne'],
+  ['above', 'Au-dessus de Y…'],
+  ['below', 'En-dessous de Y…'],
+];
+
+/** Liste de blocs (« Remplacer » : plusieurs sources pour une cible). */
+function BlockList({ p, value, onChange, block }) {
+  const rows = value?.length ? value : [block];
+  const set = (i, v) => onChange(rows.map((r, k) => (k === i ? v : r)));
+  return (
+    <div className="field">
+      <label>{p.label}</label>
+      {rows.map((r, i) => (
+        <div className="row" key={i} style={{ marginBottom: 4 }}>
+          <input className="input" value={r} onChange={(e) => set(i, e.target.value)} aria-label={`${p.label} ${i + 1}`} />
+          <button className="btn btn-icon" disabled={rows.length < 2} onClick={() => onChange(rows.filter((_, k) => k !== i))} title="Retirer">
+            <Minus size={13} />
+          </button>
+        </div>
+      ))}
+      <button className="btn" onClick={() => onChange([...rows, block])}>
+        <Plus size={13} /> Ajouter un bloc
+      </button>
+    </div>
+  );
+}
+
+/** Mélange pondéré : des blocs et leurs parts. */
+function Pattern({ p, value, onChange, block }) {
+  const rows = value?.length ? value : [{ name: block, weight: 100 }];
+  const total = rows.reduce((s, r) => s + (Number(r.weight) || 0), 0);
+  const set = (i, patch) => onChange(rows.map((r, k) => (k === i ? { ...r, ...patch } : r)));
+  return (
+    <div className="field">
+      <label>{p.label}</label>
+      {rows.map((r, i) => (
+        <div className="row" key={i} style={{ marginBottom: 4 }}>
+          <input className="input" value={r.name} onChange={(e) => set(i, { name: e.target.value })} aria-label={`Bloc ${i + 1}`} />
+          <input
+            className="input" type="number" min="1" style={{ width: 62, flex: 'none' }}
+            value={r.weight} onChange={(e) => set(i, { weight: e.target.value })} aria-label={`Part du bloc ${i + 1}`}
+          />
+          <button className="btn btn-icon" disabled={rows.length < 2} onClick={() => onChange(rows.filter((_, k) => k !== i))} title="Retirer">
+            <Minus size={13} />
+          </button>
+        </div>
+      ))}
+      <div className="row">
+        <button className="btn" onClick={() => onChange([...rows, { name: block, weight: 50 }])}>
+          <Plus size={13} /> Ajouter
+        </button>
+        <span className="spacer" style={{ flex: 1 }} />
+        {/* Les parts sont RELATIVES : le moteur normalise sur leur somme. Le
+            dire évite de croire qu'il faut tomber juste à 100. */}
+        <span className="hint" style={{ margin: 0 }}>
+          {rows.map((r) => `${Math.round(((Number(r.weight) || 0) / (total || 1)) * 100)} %`).join(' · ')}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Mask({ p, value, onChange }) {
+  const m = value || { type: 'all' };
+  const seuil = m.type === 'above' || m.type === 'below';
+  return (
+    <div className="field">
+      <label htmlFor={`p-${p.name}`}>{p.label}</label>
+      <div className="row">
+        <select
+          id={`p-${p.name}`} className="select" value={m.type}
+          onChange={(e) => onChange({ ...m, type: e.target.value })}
+        >
+          {MASKS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        {seuil && (
+          <input
+            className="input" type="number" style={{ width: 74, flex: 'none' }}
+            value={m.y ?? 0} onChange={(e) => onChange({ ...m, y: Math.round(Number(e.target.value)) || 0 })}
+            aria-label="Hauteur Y du masque"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Field({ p, value, onChange, block }) {
   const id = `p-${p.name}`;
+  if (p.type === 'blocklist') return <BlockList p={p} value={value} onChange={onChange} block={block} />;
+  if (p.type === 'pattern') return <Pattern p={p} value={value} onChange={onChange} block={block} />;
+  if (p.type === 'mask') return <Mask p={p} value={value} onChange={onChange} />;
   if (p.type === 'enum' || p.type === 'biome') {
     return (
       <div className="field">

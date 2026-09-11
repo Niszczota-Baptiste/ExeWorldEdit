@@ -39,7 +39,7 @@ function fingerprint(store, box) {
 }
 
 const SEL = { min: { x: 400, y: 0, z: 20 }, max: { x: 700, y: 40, z: 120 } };
-const PARAMS = { style: 'collines', seed: 20260910, amplitude: 0.7, scale: 64, palette: 'plains', clearAbove: true };
+const PARAMS = { style: 'collines', seed: 20260910, amplitude: 70, scale: 64, palette: 'plains', clearAbove: true };
 
 async function serie(operation, params, sel) {
   const store = new RegionStore(sources());

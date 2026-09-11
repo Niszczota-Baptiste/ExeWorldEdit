@@ -28,6 +28,7 @@ export default function App() {
   const openWorld = useApp((s) => s.openWorld);
   const loadSettings = useApp((s) => s.loadSettings);
   const setSettingsOpen = useApp((s) => s.setSettingsOpen);
+  const run = useApp((s) => s.run);
   const [dropping, setDropping] = useState(false);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -75,10 +76,14 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') { e.preventDefault(); open(); }
       if ((e.ctrlKey || e.metaKey) && e.key === ',') { e.preventDefault(); setSettingsOpen(true); }
+      // Copier / coller : les raccourcis que tout le monde essaie en premier.
+      // `typing` les laisse au champ de saisie qui a le focus.
+      if ((e.ctrlKey || e.metaKey) && !typing && e.key.toLowerCase() === 'c') { e.preventDefault(); run('copy', {}); }
+      if ((e.ctrlKey || e.metaKey) && !typing && e.key.toLowerCase() === 'v') { e.preventDefault(); run('paste', { mode: 'overlay' }); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setWheel, undo, redo, open, setSettingsOpen]);
+  }, [setWheel, undo, redo, open, setSettingsOpen, run]);
 
   const minY = geometry?.min.y ?? 0;
   const maxY = geometry ? geometry.min.y + geometry.size.y - 1 : 0;

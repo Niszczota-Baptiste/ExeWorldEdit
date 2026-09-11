@@ -113,7 +113,11 @@ export const scenarios = {
     const { opTerrain } = await import('../src/worldedit/transform.js');
     collect();
     const m = await measure(() => opTerrain(store, box, {
-      style: 'hills', amplitude: 70, scale: 0, seed: 20260910, palette: 'plains', clearAbove: true,
+      // `hills` n'est pas un style (ils sont en français) et `amplitude` était
+      // serrée à 0..1 : ce scénario tournait donc en `collines` à 100 %. On
+      // l'écrit tel qu'il s'exécutait, pour rester comparable à la référence
+      // figée — la corriger ici invaliderait tout `baseline.json`.
+      style: 'collines', amplitude: 100, scale: 0, seed: 20260910, palette: 'plains', clearAbove: true,
     }, { yield: async () => {} }));
     return { ...m, n: 1024 * 1024, unit: 'colonnes' };
   },
