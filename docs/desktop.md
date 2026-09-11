@@ -1396,11 +1396,37 @@ cobblestone.
 
 ### D'où viennent les textures
 
-Pas de ce dépôt — les assets du jeu ne peuvent pas y être redistribués.
-L'application lit le pack qu'on lui **désigne** dans les réglages : le `.jar`
-d'une version de Minecraft, un pack de ressources zippé, ou un dossier déplié.
-Le pack du serveur Minefield fournit de la même façon les blocs
-`minefield:*` — y compris leur forme.
+Pas de ce dépôt, et pas de l'installeur non plus : les textures appartiennent à
+Mojang et son EULA interdit de les redistribuer. Les embarquer exposerait celui
+qui diffuse l'application.
+
+L'application lit donc **l'installation de l'utilisateur** — c'est ce que font
+WorldPainter, Amulet et Litematica — et le résultat est meilleur qu'un pack
+embarqué : le dossier d'un launcher contient le `.jar` de la version **et** les
+packs de ressources installés à côté, donc les blocs `minefield:*` arrivent avec
+leurs textures sans que personne configure quoi que ce soit.
+
+La détection cherche un dossier `versions/`, **jamais un nom**. C'est ce qui
+compte : le launcher d'un serveur n'est pas `.minecraft`. Celui d'un
+utilisateur était `%APPDATA%\.minefield_1_18` — chercher « .minecraft » n'aurait
+rien trouvé chez lui, alors que c'est précisément l'installation qui contient à
+la fois le jeu et le pack du serveur.
+
+Les packs se lisent en **pile**, dans l'ordre du jeu : un pack de ressources
+recouvre le `.jar`. Sans cet ordre, un bloc `minefield:*` ne trouverait rien.
+
+![La pile détectée](images/pack-detecte.png)
+
+*Zéro configuration : le pack du serveur en 1, le jeu en 2.*
+
+Un détail qui se paie cher si on le rate : les versions se comparent en
+**nombres**, pas en texte. « 1.9 » passe après « 1.18 » dans l'ordre
+alphabétique, et l'application ouvrirait les textures d'une version de 2016. Et
+une publication passe avant une capture instantanée — `24w14a` trie plus haut
+que `1.21` mais n'a rien à faire dans une palette par défaut.
+
+Les réglages restent là pour ajouter un pack à la main ou en retirer un ;
+« Détection automatique » rend la main au disque.
 
 La chaîne suivie est celle du jeu, en entier :
 

@@ -296,7 +296,8 @@ app.whenReady().then(async () => {
       filters: [{ name: 'Pack de ressources ou .jar', extensions: ['zip', 'jar'] }],
     });
     if (res.canceled || !res.filePaths[0]) return null;
-    return engine.call('setResourcePack', { path: res.filePaths[0] });
+    // On rend le CHEMIN : c'est le renderer qui sait où le placer dans la pile.
+    return res.filePaths[0];
   });
 
   ipcMain.handle('shell:window', (_e, action) => {

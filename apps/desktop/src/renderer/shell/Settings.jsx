@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Settings2, Gauge, Type, Layers, RotateCcw, Boxes, Ruler, AlertTriangle, FolderOpen } from './icons.js';
+import { Settings2, Gauge, Type, Layers, RotateCcw, Boxes, Ruler, AlertTriangle, FolderOpen, X } from './icons.js';
 import { useApp } from '../store.js';
 import { ACCENTS, RANGES, DEFAULT_SETTINGS } from '../theme.js';
 import { ACTIONS, KEY_GROUPS, DEFAULT_KEYS, describeBinding, bindingFromEvent, keyConflicts } from '../keys.js';
@@ -27,7 +27,7 @@ export default function Settings() {
   const resetKeys = useApp((s) => s.resetKeys);
   const pack = useApp((s) => s.pack);
   const pickPack = useApp((s) => s.pickResourcePack);
-  const setPack = useApp((s) => s.setResourcePack);
+  const setPacks = useApp((s) => s.setResourcePacks);
 
   if (!open) return null;
 
@@ -131,28 +131,26 @@ export default function Settings() {
 
           <Section icon={<Layers size={12} />} title="Icônes de blocs">
             <p className="hint" style={{ marginTop: 0 }}>
-              Les textures du jeu ne peuvent pas être livrées avec l’application.
-              Désigne un pack de ressources — le <code>.jar</code> d’une version de
-              Minecraft, un pack zippé, ou un dossier déplié — et la palette montre
-              les vraies icônes. Le pack du serveur fournit de la même façon les
-              blocs <code>minefield:*</code>, <b>leur forme comprise</b> : une chaise
-              est dessinée en chaise, pas en cube.
+              Les textures du jeu appartiennent à Mojang et ne peuvent pas être
+              livrées avec l’application. Elle lit donc <b>ton installation</b> :
+              le <code>.jar</code> de ta version et les packs de ressources
+              installés à côté — dont celui du serveur, qui apporte les blocs
+              <code> minefield:*</code> <b>avec leur forme</b> (une chaise est
+              dessinée en chaise, pas en cube).
             </p>
-            <div className="row">
+
+            <PileDePacks pack={pack} onSet={setPacks} />
+
+            <div className="row" style={{ marginTop: 8 }}>
               <button className="btn" onClick={pickPack}>
-                <FolderOpen size={13} /> Choisir un pack
+                <FolderOpen size={13} /> Ajouter un pack…
               </button>
-              {pack?.path && (
-                <button className="btn" onClick={() => setPack(null)} title="Revenir aux carrés de couleur">
-                  <RotateCcw size={13} /> Retirer
+              {!pack?.auto && (
+                <button className="btn" onClick={() => setPacks(null)} title="Reprendre ce qui est détecté sur la machine">
+                  <RotateCcw size={13} /> Détection automatique
                 </button>
               )}
             </div>
-            <p className="hint" style={{ color: pack && !pack.ok ? 'var(--danger)' : undefined }}>
-              {!pack?.path && 'Aucun pack : la palette affiche des carrés de couleur dérivés du nom.'}
-              {pack?.path && pack.ok && <>Chargé : <b className="kv-path">{pack.path}</b>{pack.entries ? ` — ${pack.entries.toLocaleString('fr-FR')} entrées.` : '.'}</>}
-              {pack?.path && !pack.ok && <>Illisible comme pack de ressources : <b className="kv-path">{pack.path}</b> ({pack.reason}).</>}
-            </p>
           </Section>
 
           <Section icon={<Ruler size={12} />} title="Raccourcis clavier">
@@ -209,6 +207,51 @@ export default function Settings() {
         </footer>
       </div>
     </div>
+  );
+}
+
+/**
+ * La pile de packs : ce qui sera lu, dans l'ordre où ça l'est.
+ *
+ * L'ordre COMPTE et doit se voir : le premier recouvre les suivants, comme dans
+ * le jeu. Un pack de serveur sous le `.jar` ne servirait à rien.
+ */
+function PileDePacks({ pack, onSet }) {
+  const chemins = pack?.paths || [];
+  const nom = (c) => pack?.candidates?.find((x) => x.path === c)?.name || c.split(/[\\/]/).pop();
+
+  if (!chemins.length) {
+    return (
+      <p className="hint" data-tone="select">
+        Aucune installation de Minecraft trouvée sur cette machine. La palette
+        affiche des carrés de couleur. Ajoute un <code>.jar</code> de version
+        pour les vraies icônes.
+      </p>
+    );
+  }
+  return (
+    <>
+      {chemins.map((c, i) => (
+        <div key={c} className="row" style={{ alignItems: 'center', marginBottom: 3 }}>
+          <span className="hint" style={{ margin: 0, width: 16, flex: 'none' }}>{i + 1}</span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 'var(--t-small)', color: 'var(--text-dim)' }} title={c}>
+            <span className="kv-path">{nom(c)}</span>
+          </span>
+          <button
+            className="btn btn-icon" title="Retirer de la pile"
+            onClick={() => onSet(chemins.filter((x) => x !== c))}
+          >
+            <X size={12} />
+          </button>
+        </div>
+      ))}
+      <p className="hint" style={{ color: pack.ok ? undefined : 'var(--select)' }}>
+        {pack.auto && <b>Détecté automatiquement. </b>}
+        {pack.ok && <>Le premier recouvre les suivants. {(pack.entries || 0).toLocaleString('fr-FR')} entrées lisibles.</>}
+        {!pack.ok && pack.reason === 'sans_jeu' && <>Ces packs ne contiennent que leurs propres blocs : ajoute le <code>.jar</code> d’une version de Minecraft pour le reste.</>}
+        {!pack.ok && pack.reason !== 'sans_jeu' && <>Pile illisible ({pack.reason}).</>}
+      </p>
+    </>
   );
 }
 

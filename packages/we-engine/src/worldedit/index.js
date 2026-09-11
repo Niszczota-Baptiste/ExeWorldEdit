@@ -11,4 +11,5 @@ export * from './zipWriter.js';
 export * from './operations.js';
 export * from './jobs.js';
 export * from './resourcePack.js';
+export * from './packDetect.js';
 export { zipIndex, zipRead } from './zipReader.js';

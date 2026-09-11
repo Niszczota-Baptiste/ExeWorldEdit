@@ -126,27 +126,31 @@ export const useApp = create((set, get) => ({
     return get().pack;
   },
 
-  /** Ouvre le dialogue : c'est le principal qui choisit le chemin, pas nous. */
+  /**
+   * Ouvre le dialogue et AJOUTE le pack choisi en tête de pile : c'est là qu'il
+   * recouvre le reste, et c'est ce qu'on attend d'un pack qu'on vient de
+   * désigner. Le principal choisit le chemin, pas nous.
+   */
   async pickResourcePack() {
     try {
-      const pack = await api().pickResourcePack();
-      if (!pack) return null;
-      set({ pack, icons: {} });
-      get().say(pack.ok
-        ? `Pack de ressources : ${pack.path}`
-        : `Ce dossier ou fichier n’est pas un pack de ressources (${pack.reason}).`);
-      return pack;
+      const choisi = await api().pickResourcePack();
+      if (!choisi) return null;
+      const actuels = get().pack?.paths || [];
+      return get().setResourcePacks([choisi, ...actuels.filter((p) => p !== choisi)]);
     } catch (e) { get().say(errorText(e, 'pack de ressources')); return null; }
   },
 
-  async setResourcePack(chemin) {
+  /**
+   * Pose la pile de packs. `null` rend la main à la détection automatique ;
+   * `[]` coupe les icônes.
+   */
+  async setResourcePacks(paths) {
     try {
-      const pack = await api().engine.setResourcePack({ path: chemin });
-      // Les icônes du pack précédent n'ont plus rien à voir avec le nouveau.
+      const pack = await api().engine.setResourcePacks({ paths });
+      // Les icônes de la pile précédente n'ont plus rien à voir avec celle-ci.
       set({ pack, icons: {} });
-      get().say(pack.ok
-        ? `Pack de ressources : ${pack.path}`
-        : `Ce dossier ou fichier n’est pas un pack de ressources (${pack.reason}).`);
+      get().say(packMessage(pack));
+      await get().loadCatalog(); // le pack déclare aussi CE QUI existe
       return pack;
     } catch (e) { get().say(errorText(e, 'pack de ressources')); return null; }
   },
@@ -540,7 +544,17 @@ export const useApp = create((set, get) => ({
  * Les codes du moteur deviennent des phrases qui disent QUOI FAIRE. Afficher
  * `selection_too_large` à un utilisateur, c'est lui laisser deviner.
  */
-export function errorText(e, context) {
+export /** Ce qu'on dit d'une pile de packs, selon ce qui manque. */
+function packMessage(pack) {
+  if (!pack?.paths?.length) return 'Aucun pack : la palette affiche des carrés de couleur.';
+  if (pack.ok) return `Icônes : ${pack.sources} pack(s), ${(pack.entries || 0).toLocaleString('fr-FR')} entrées.`;
+  if (pack.reason === 'sans_jeu') {
+    return 'Ce pack ne contient que ses propres blocs : ajoute aussi le .jar d’une version de Minecraft pour le reste.';
+  }
+  return `Pack illisible (${pack.reason}).`;
+}
+
+function errorText(e, context) {
   const code = String(e?.message || '').replace(/^Error:\s*/, '');
   return ERREURS[code] || `Échec de ${context} : ${code}`;
 }

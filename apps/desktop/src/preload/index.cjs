@@ -15,7 +15,7 @@ const ENGINE_METHODS = [
   'inspectWorld',
   'listSchematics', 'saveSchematic', 'loadSchematic', 'removeSchematic', 'hasClipboard',
   'getSettings', 'saveSettings', 'listBlocks',
-  'resourcePackInfo', 'setResourcePack', 'blockIcons',
+  'resourcePackInfo', 'setResourcePacks', 'blockIcons',
   // Panneau, carte en blocs, relief : l'interface prépare la grille, le moteur l'écrit.
   'textSvg', 'panelPresets', 'mapPalette', 'applyPanel', 'applyMapBlocks', 'applyHeightmap', 'exportHeightmap',
   'info',

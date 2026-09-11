@@ -1,4 +1,5 @@
 import path from 'node:path';
+import os from 'node:os';
 import fs from 'node:fs';
 import { FsAdapter, defaultRoot } from '@titi/we-engine/storage';
 import {
@@ -15,7 +16,7 @@ import { CATALOG, GROUPS, normalizeExtras } from '@titi/we-engine/blocks';
 import { renderTextSvg } from '@titi/we-engine/worldedit';
 import { flatBlockColors } from '@titi/we-engine/colors';
 import { safeFileNameExt } from '@titi/we-engine/filename';
-import { planIcone } from '@titi/we-engine/worldedit';
+import { planIcone, pickLatestVersion, orderPacks, pileComplete } from '@titi/we-engine/worldedit';
 import { zipIndex, zipRead } from '@titi/we-engine/worldedit';
 import { PANEL_PRESETS } from '@titi/we-engine/staging';
 
@@ -60,14 +61,128 @@ const clampSS = (v) => Math.max(1, Math.min(8, Math.round(Number(v)) || 1));
  */
 let packCache = null;
 
+/**
+ * Une PILE de packs lue comme un seul. Le premier qui a l'entrée gagne.
+ *
+ * C'est l'ordre de Minecraft : un pack de ressources recouvre le jeu. Sans ça,
+ * un bloc `minefield:*` ne trouverait rien — le `.jar` de version ne le connaît
+ * pas — et le vanilla resterait sans texture si on ne chargeait que le pack du
+ * serveur.
+ */
+function ouvrePile(chemins) {
+  const cle = chemins.join('\u0000');
+  if (packCache?.cle === cle) return packCache.pack;
+  const packs = [];
+  for (const c of chemins) {
+    try { packs.push(ouvreUn(c)); } catch { /* pack disparu ou illisible : on continue sans */ }
+  }
+  const pack = {
+    count: packs.reduce((n, p) => n + (p.count || 0), 0) || null,
+    sources: packs.length,
+    read: (nom) => {
+      for (const p of packs) {
+        const buf = p.read(nom);
+        if (buf) return buf;
+      }
+      return null;
+    },
+    ids: () => {
+      const vus = new Set();
+      for (const p of packs) for (const id of p.ids()) vus.add(id);
+      return [...vus];
+    },
+  };
+  packCache = { cle, pack };
+  return pack;
+}
+
+/** Les chemins configurés, ou ceux détectés si rien n'est configuré. */
+function cheminsPack() {
+  const r = adapter.readSettings().resourcePacks;
+  if (Array.isArray(r)) return r.filter((x) => typeof x === 'string' && x);
+  // Rien de configuré : on prend ce qu'on trouve, sans rien demander. C'est la
+  // différence entre « ça marche » et « ça marche après avoir lu la doc ».
+  return orderPacks(detecteInstances().flatMap(candidatsDe)).map((c) => c.path);
+}
+
+// ── Détection de l'installation ───────────────────────────────────────────────
+//
+// Les textures du jeu ne sont pas livrées avec l'application : l'EULA de Mojang
+// interdit de les redistribuer. On lit celles que l'utilisateur a déjà — ce que
+// font tous les outils du genre — et le résultat est meilleur qu'un pack
+// embarqué : le dossier d'un launcher contient AUSSI les packs du serveur, donc
+// les blocs `minefield:*` arrivent avec leurs textures sans rien demander.
+
+/** Racines où un launcher range ses affaires, selon la plateforme. */
+function racinesLaunchers() {
+  const home = os.homedir();
+  if (process.platform === 'win32') {
+    return [process.env.APPDATA || path.join(home, 'AppData', 'Roaming')];
+  }
+  if (process.platform === 'darwin') return [path.join(home, 'Library', 'Application Support')];
+  return [home, path.join(home, '.local', 'share')];
+}
+
+const listeSure = (dir) => {
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- dossiers système connus, pas une saisie
+    return fs.readdirSync(dir, { withFileTypes: true });
+  } catch { return []; }
+};
+
+/**
+ * Instances de jeu trouvées sur la machine.
+ *
+ * Le critère est la présence d'un dossier `versions/`, pas le nom : la capture
+ * d'un utilisateur montrait `%APPDATA%\.minefield_1_18`, le launcher du
+ * serveur. Chercher « .minecraft » n'aurait rien trouvé chez lui — et c'est
+ * justement l'installation qui contient à la fois le jeu et le pack du serveur.
+ */
+export function detecteInstances() {
+  const out = [];
+  for (const racine of racinesLaunchers()) {
+    for (const e of listeSure(racine)) {
+      if (!e.isDirectory()) continue;
+      const dir = path.join(racine, e.name);
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin joint sous une racine système
+      if (!fs.existsSync(path.join(dir, 'versions'))) continue;
+      out.push({ name: e.name, path: dir });
+    }
+  }
+  return out;
+}
+
+/**
+ * Candidats de pack d'une instance : son `.jar` de version le plus récent, et
+ * les packs de ressources installés.
+ */
+export function candidatsDe(instance) {
+  const out = [];
+  const versions = listeSure(path.join(instance.path, 'versions'))
+    .filter((e) => e.isDirectory()).map((e) => e.name);
+  const v = pickLatestVersion(versions);
+  if (v) {
+    const jar = path.join(instance.path, 'versions', v, `${v}.jar`);
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin dérivé d'un dossier de versions
+    if (fs.existsSync(jar)) out.push({ kind: 'jar', path: jar, name: `${instance.name} · ${v}`, version: v });
+  }
+  for (const e of listeSure(path.join(instance.path, 'resourcepacks'))) {
+    const f = path.join(instance.path, 'resourcepacks', e.name);
+    // Un pack est soit un zip, soit un dossier qui porte un `pack.mcmeta`.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin dérivé du dossier resourcepacks
+    const ok = e.isFile() ? /\.zip$/i.test(e.name) : fs.existsSync(path.join(f, 'pack.mcmeta'));
+    if (ok) out.push({ kind: 'pack', path: f, name: `${instance.name} · ${e.name}` });
+  }
+  return out;
+}
+
 /** `assets/<ns>/blockstates/<nom>.json` → `ns:nom`. */
 const idDepuisBlockstate = (chemin) => {
   const m = chemin.match(/^assets\/([a-z0-9_.-]+)\/blockstates\/([a-z0-9_./-]+)\.json$/);
   return m ? `${m[1]}:${m[2]}` : null;
 };
 
-function ouvrePack(chemin) {
-  if (packCache?.chemin === chemin) return packCache.pack;
+function ouvreUn(chemin) {
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin choisi par l'utilisateur dans un dialogue
   const stat = fs.statSync(chemin);
   let pack;
@@ -112,7 +227,6 @@ function ouvrePack(chemin) {
       read: (nom) => zipRead(buf, index, nom),
     };
   }
-  packCache = { chemin, pack };
   return pack;
 }
 
@@ -539,10 +653,10 @@ const methods = {
     // blockstate par bloc, `minefield:*` compris. C'est ce qui rend le
     // catalogue complet sans que ce dépôt ait à connaître les blocs du
     // serveur — désigner le pack du serveur suffit.
-    const chemin = adapter.readSettings().resourcePack;
-    if (chemin) {
+    const chemins = cheminsPack();
+    if (chemins.length) {
       try {
-        for (const id of ouvrePack(chemin).ids()) {
+        for (const id of ouvrePile(chemins).ids()) {
           if (connus.has(id)) continue;
           connus.add(id);
           blocks.push({ id, group: id.startsWith('minefield:') ? 'minefield' : 'autre', fromPack: true });
@@ -561,24 +675,38 @@ const methods = {
 
   /** Ce que l'écran des réglages a besoin de savoir du pack configuré. */
   resourcePackInfo: () => {
-    const chemin = adapter.readSettings().resourcePack || null;
-    if (!chemin) return { path: null, ok: false, reason: 'aucun' };
+    const configure = Array.isArray(adapter.readSettings().resourcePacks);
+    const chemins = cheminsPack();
+    const trouves = orderPacks(detecteInstances().flatMap(candidatsDe));
+    if (!chemins.length) {
+      return { paths: [], ok: false, reason: 'aucun', auto: !configure, candidates: trouves };
+    }
     try {
-      const pack = ouvrePack(chemin);
+      const pack = ouvrePile(chemins);
       // Une sonde plutôt qu'un simple test d'existence : un dossier qui n'est
       // pas un pack, ou un zip sans `assets/`, doit se dire tout de suite et
       // pas au premier bloc qui n'a pas d'icône.
-      const sonde = pack.read('assets/minecraft/blockstates/stone.json')
-        || pack.read('pack.mcmeta');
-      return { path: chemin, ok: !!sonde, reason: sonde ? 'ok' : 'pas_un_pack', entries: pack.count ?? null };
+      const sonde = pack.read('assets/minecraft/blockstates/stone.json');
+      return {
+        paths: chemins,
+        ok: !!sonde,
+        // Un pack de serveur seul ne connaît que ses blocs : le dire vaut mieux
+        // que laisser croire à un bug quand tout le vanilla reste sans icône.
+        reason: sonde ? 'ok' : (pileComplete(trouves) ? 'pas_un_pack' : 'sans_jeu'),
+        entries: pack.count ?? null,
+        sources: pack.sources,
+        auto: !configure,
+        candidates: trouves,
+      };
     } catch (err) {
-      return { path: chemin, ok: false, reason: err?.message || 'illisible' };
+      return { paths: chemins, ok: false, reason: err?.message || 'illisible', auto: !configure, candidates: trouves };
     }
   },
 
-  setResourcePack: ({ path: chemin }) => {
+  /** `paths: null` remet la détection automatique ; `[]` coupe les icônes. */
+  setResourcePacks: ({ paths }) => {
     packCache = null; // le prochain accès rouvre
-    adapter.writeSettings({ resourcePack: chemin || null });
+    adapter.writeSettings({ resourcePacks: Array.isArray(paths) ? paths : null });
     return methods.resourcePackInfo();
   },
 
@@ -593,10 +721,10 @@ const methods = {
    * icône fausse est pire qu'un carré de couleur, parce qu'on la croit.
    */
   blockIcons: ({ ids }) => {
-    const chemin = adapter.readSettings().resourcePack;
-    if (!chemin) return {};
+    const chemins = cheminsPack();
+    if (!chemins.length) return {};
     let pack;
-    try { pack = ouvrePack(chemin); } catch { return {}; }
+    try { pack = ouvrePile(chemins); } catch { return {}; }
 
     const out = {};
     for (const id of (Array.isArray(ids) ? ids : []).slice(0, 256)) {

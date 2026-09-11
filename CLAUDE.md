@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (375 tests aujourd'hui : 315 moteur, 60 desktop)
+npm test          # tous les paquets (381 tests aujourd'hui : 320 moteur, 61 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -264,6 +264,19 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   allocations par bloc pour une palette de dix. Un index `Map` construit une
   fois par section : × 3,5. Corollaire : les opérations parcourent en YZX, donc
   un mémo d'UNE case sur la section résolue supprime les recherches de chunk.
+- **On ne redistribue PAS les assets de Mojang.** Les embarquer dans
+  l'installeur exposerait celui qui le diffuse — l'EULA l'interdit. On lit
+  l'installation de l'utilisateur, comme le font WorldPainter, Amulet et
+  Litematica, et le résultat est meilleur qu'un pack embarqué : le dossier d'un
+  launcher contient aussi les packs du SERVEUR, donc les blocs custom arrivent
+  avec leurs textures sans rien demander.
+- **Chercher « .minecraft » ne trouve pas l'installation.** Un serveur a son
+  propre launcher : celui d'un utilisateur était `%APPDATA%\.minefield_1_18`. Le
+  critère de détection est la présence d'un dossier `versions/`, jamais le nom.
+- **Trier des versions en TEXTE choisit la mauvaise.** « 1.9 » passe après
+  « 1.18 », et l'application ouvrirait les textures d'une version de 2016. La
+  comparaison est numérique composant par composant, et une publication passe
+  avant une capture instantanée (`24w14a` trie plus haut que `1.21`).
 - **Un carré de couleur ne dit pas quel bloc c'est.** Trente nuances de gris se
   ressemblent toutes. Les vraies textures sont dans le jeu et ne peuvent pas
   être embarquées : l'application lit le pack qu'on lui désigne et suit la
