@@ -583,6 +583,31 @@ test('panneau : le masque sépare l’encre du fond, et le fond est reproductibl
   assert.equal(store.getBlock(1, 1, 5).Name, 'minecraft:black_concrete');
 });
 
+test('panneau : deux exécutions à graine égale donnent le MÊME fond', async () => {
+  // Invariant n° 4. Le fond marbré est un tirage pondéré par case ; il tombait
+  // sur `Math.random` faute de générateur, donc deux panneaux identiques ne
+  // l'étaient jamais — et le refaire après une annulation changeait le mur.
+  const pose = async () => {
+    const { staging, project } = makeProject();
+    const sel = { min: { x: 1, y: 1, z: 4 }, max: { x: 12, y: 9, z: 4 } };
+    await staging.applyPanel({
+      project: project(), selection: sel, preset: 'white_marble', seed: 4242,
+      mask: new Uint8Array(12 * 9), actor: 'moi',
+    });
+    const store = staging.loadStore(project());
+    await store.warmup(sel);
+    const out = [];
+    for (let y = sel.min.y; y <= sel.max.y; y++)
+      for (let x = sel.min.x; x <= sel.max.x; x++) out.push(store.getBlock(x, y, 4)?.Name || 'air');
+    return out.join('|');
+  };
+  const a = await pose();
+  assert.equal(a, await pose());
+  // Et le fond est bien MÉLANGÉ : une graine qui rendrait partout le même bloc
+  // passerait le test ci-dessus sans rien prouver.
+  assert.ok(new Set(a.split('|')).size > 1, 'le fond doit mélanger plusieurs blocs');
+});
+
 test('panneau : un masque trop court est refusé', async () => {
   const { staging, project } = makeProject();
   await assert.rejects(

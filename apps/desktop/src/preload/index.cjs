@@ -15,6 +15,8 @@ const ENGINE_METHODS = [
   'inspectWorld',
   'listSchematics', 'saveSchematic', 'loadSchematic', 'removeSchematic', 'hasClipboard',
   'getSettings', 'saveSettings', 'listBlocks',
+  // Panneau, carte en blocs, relief : l'interface prépare la grille, le moteur l'écrit.
+  'textSvg', 'panelPresets', 'mapPalette', 'applyPanel', 'applyMapBlocks', 'applyHeightmap', 'exportHeightmap',
   'info',
 ];
 
@@ -38,6 +40,9 @@ contextBridge.exposeInMainWorld('titi', {
   /** Ouvre un chemin déjà connu — glisser-déposer. */
   openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath),
   saveExport: (opts) => ipcRenderer.invoke('shell:saveExport', opts),
+  /** Choisir une image (panneau, carte, relief) : le principal lit, pas nous. */
+  openImage: () => ipcRenderer.invoke('shell:openImage'),
+  savePng: (opts) => ipcRenderer.invoke('shell:savePng', opts),
   applyToWorld: (opts) => ipcRenderer.invoke('shell:applyToWorld', opts),
   window: {
     minimize: () => ipcRenderer.invoke('shell:window', 'minimize'),

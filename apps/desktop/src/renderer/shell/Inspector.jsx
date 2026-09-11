@@ -2,6 +2,24 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Play, Settings2, Undo2, Redo2, FileDown, Globe, AlertTriangle, Plus, Minus } from './icons.js';
 import { OPERATIONS } from '@titi/we-engine/operations';
 import { useApp, TOOL_OPS, TOOLS, TOOL_NOTES } from '../store.js';
+import PanelTool from './tools/PanelTool.jsx';
+import HeightmapTool from './tools/HeightmapTool.jsx';
+import LibraryTool from './tools/LibraryTool.jsx';
+import { ActionSlot } from './actionSlot.js';
+
+/**
+ * Outils qui ont leur PROPRE écran au lieu d'un formulaire généré.
+ *
+ * Ce ne sont pas des opérations du descripteur : ce qu'ils envoient au moteur
+ * n'est pas une poignée de paramètres mais une grille entière — un masque, des
+ * noms de blocs, des hauteurs — que seule l'interface peut fabriquer.
+ */
+const TOOL_PANELS = {
+  panel: PanelTool,
+  heightmap: HeightmapTool,
+  library: LibraryTool,
+};
+
 
 // Inspecteur contextuel : les réglages de l'outil courant.
 //
@@ -32,6 +50,8 @@ export default function Inspector() {
   // bouton décrivent une AUTRE opération — et c'est celle-là qui part au
   // moteur. Retomber sur le premier élément est le seul état cohérent.
   const active = ops.length && !ops.includes(operation) ? ops[0] : operation;
+  const Panneau = TOOL_PANELS[tool];
+  const [actionsEl, setActionsEl] = useState(null);
   const spec = byId.get(active);
   const [values, setValues] = useState({});
   const toolMeta = TOOLS.find((t) => t.id === tool);
@@ -87,13 +107,16 @@ export default function Inspector() {
             flottaison du panneau et devenait introuvable. */}
         <Selection selection={selection} />
 
-        {/* Outil sans opérations : on dit ce qu'il fait, et on s'arrête là. */}
-        {ops.length === 0 && (
-          <p className="hint" style={{ margin: '0 0 12px' }}>
-            {TOOL_NOTES[tool]?.soon && <b style={{ color: 'var(--select)' }}>À venir. </b>}
-            {TOOL_NOTES[tool]?.text || 'Cet outil n’a pas de réglages.'}
-          </p>
-        )}
+        {/* Outil sans opérations : son écran s'il en a un, sinon ce qu'il fait
+            et ce qui manque. Jamais le formulaire de l'opération d'avant. */}
+        {ops.length === 0 && (Panneau
+          ? <ActionSlot.Provider value={actionsEl}><Panneau /></ActionSlot.Provider>
+          : (
+            <p className="hint" style={{ margin: '0 0 12px' }}>
+              {TOOL_NOTES[tool]?.soon && <b style={{ color: 'var(--select)' }}>À venir. </b>}
+              {TOOL_NOTES[tool]?.text || 'Cet outil n’a pas de réglages.'}
+            </p>
+          ))}
 
         {ops.length > 0 && (
           <div className="field">
@@ -121,6 +144,9 @@ export default function Inspector() {
             le bouton principal passait sous la ligne de flottaison et il
             fallait défiler pour le trouver. */}
         <div className="panel-actions">
+          {/* Le bouton des écrans d'outils arrive ICI par portail, donc AVANT
+              annuler/rétablir. */}
+          <div ref={setActionsEl} />
           {ops.length > 0 && (
             <button
               className="btn btn-wide"

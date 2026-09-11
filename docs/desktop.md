@@ -1238,6 +1238,94 @@ bouton). Ce qu'on capture reste un état atteignable à la main.
 
 ---
 
+## Les trois écrans qui manquaient
+
+« Texte et carte », « Relief » et « Bibliothèque » étaient marqués « à venir » :
+le moteur savait faire, l'écran manquait. Les voici.
+
+### Le partage du travail
+
+Les trois ont la même forme. L'interface prépare une **grille** — un masque
+d'encre, des noms de blocs, des hauteurs — et le moteur l'écrit. Le découpage
+n'est pas arbitraire :
+
+| Qui | Quoi | Pourquoi lui |
+|---|---|---|
+| Moteur | la police embarquée, la palette de couleurs de carte | le rendu doit être le même partout, et la palette est une donnée du jeu |
+| Renderer | rasteriser un SVG, décoder un PNG, échantillonner | c'est un navigateur : il le fait sans une ligne de code |
+| Moteur | écrire les blocs | lui seul touche aux fichiers de région |
+
+Le renderer ne lit toujours pas le disque : les octets d'image lui arrivent du
+processus principal (`openImage`), et le PNG qu'il produit repart par lui
+(`savePng`). L'invariant n° 6 tient.
+
+La partie qui décide — quel bloc pour quelle couleur, quelle hauteur pour quel
+gris — est dans `grid/pixels.js`, sans aucune dépendance au DOM, donc testable
+sans navigateur. Ce qui touche un canvas est dans `draw.js`, et n'a pas de
+décision à prendre.
+
+![« MINEFIELD » écrit en blocs](images/panneau-texte.png)
+
+*Le texte part de la police embarquée du moteur, traverse un canvas du renderer
+et revient en 1 825 blocs sur un mur de marbre. Capture prise en pilotant la
+vraie interface : sélection tapée dans les six champs, outil choisi par son
+raccourci, bouton cliqué.*
+
+### Deux moitiés justes, une jonction fausse
+
+`toHeights` rendait des hauteurs **en blocs**. `applyHeightmap` attend un
+**rapport 0..1** et fait `clamp01(h) * maxH`. Chaque moitié passait ses tests.
+Ensemble, toute cellule non nulle devenait 1 :
+
+```
+attendu   un dégradé diagonal, 0 → 32 blocs
+obtenu    un plateau plat au sommet de la sélection
+mesuré    1 022 cellules fausses sur 1 024, jusqu'à 31 blocs d'écart
+```
+
+Rien ne l'aurait signalé — pas d'exception, pas de message, juste un relief qui
+n'est pas celui qu'on a demandé. C'est l'aller-retour qui l'a trouvé : sculpter
+depuis une image, ressortir le relief, comparer. Il est maintenant un test
+permanent (`test/grid-roundtrip.test.js`), avec ses équivalents pour le masque
+du panneau et le damier de la carte — une unité qui traverse une frontière se
+vérifie **en traversant**.
+
+### Une épaisseur qui ne se voyait pas
+
+Un panneau est estampé sur toute la profondeur de son axe plat. Sur une
+sélection cubique de 192 × 57 × 192, « poser un panneau » a écrit **1 647 870
+blocs** — le comportement voulu, mais rien à l'écran ne le disait. L'outil
+annonce désormais l'épaisseur et le total, et conseille d'aplatir la sélection.
+
+### Un moteur mort, une application muette
+
+En branchant tout ça, un import fautif — `flatBlockColors` vit dans `./colors`,
+pas dans `./worldedit` — a fait sortir l'`utilityProcess` dès son chargement. Le
+processus principal attendait `engine.whenReady` avant d'ouvrir la fenêtre :
+
+```
+pas de fenêtre · pas de message · pas de fin
+```
+
+L'application restait en vie, indéfiniment, sans rien afficher. Le seul indice
+était la trace du fils, noyée dans les avertissements de Chromium.
+`whenReady` peut maintenant **échouer** — un moteur qui meurt avant d'avoir dit
+« prêt » rejette la promesse —, et le principal ouvre un dialogue d'erreur au
+lieu de rester suspendu. Le mode capture a gagné le même filet : une capture qui
+n'aboutit pas sort en erreur au lieu de pendre.
+
+### Piloter l'interface pour la vérifier
+
+Le mode capture sait maintenant poser une sélection (`TITI_SCREENSHOT_SELECTION`),
+choisir un outil, choisir une opération et cliquer un bouton — toujours par le
+vrai chemin. Écrire ce pilotage a révélé un piège de React :
+`dispatchEvent(new Event('blur'))` n'appelle **pas** le `onBlur` d'un composant,
+parce que React écoute `focusout`, qui remonte, alors que `blur` ne remonte pas.
+Il faut `focus()` puis `blur()` pour de vrai. Le symptôme, côté utilisateur d'un
+script d'automatisation, serait « le champ ne marche pas ».
+
+---
+
 ## Rejouabilité des tirages aléatoires
 
 L'invariant n° 4 veut que toute génération aléatoire soit rejouable à seed
@@ -1429,8 +1517,13 @@ atteignable à la main, pas un état forcé qui pourrait mentir :
 | `TITI_SCREENSHOT_WHEEL=1` | ouvre la roue d'outils | touche `Espace` |
 | `TITI_SCREENSHOT_SETTINGS=1` | ouvre les réglages | `Ctrl` `,` |
 | `TITI_SCREENSHOT_TOOL=B` | choisit un outil | sa lettre de raccourci |
+| `TITI_SCREENSHOT_SELECTION=x0,y0,z0,x1,y1,z1` | pose une sélection | les six champs, `focus()` puis `blur()` |
 | `TITI_SCREENSHOT_OP=mix` | choisit une opération | le vrai `<select>`, vrai `change` |
 | `TITI_SCREENSHOT_CLICK=<sélecteur>` | clique un élément | `.click()` sur le vrai bouton |
+| `TITI_SCREENSHOT_CLICK_WAIT=20000` | attend après le clic | un clic peut lancer une opération longue |
+
+Une capture qui n'aboutit pas **échoue** au lieu de pendre : un filet sort en
+erreur passé le délai plus trente secondes.
 
 `TITI_SCREENSHOT_DELAY` règle l'attente avant la prise (9 000 ms par défaut).
 
@@ -1449,6 +1542,7 @@ jetable sans toucher au vrai.
 | 2.2 | Ouverture et export | **fait** — `.mca`, `.zip`, dossier de save, dossier `region/`, `.schem`, `.litematic`, glisser-déposer ; export `.mca`/`.schem`/`.litematic` ; « Appliquer au monde » avec verrou `session.lock` et sauvegarde horodatée. Reste : récupération après crash explicite (le staging est déjà persistant) |
 | 2.3 | Direction visuelle (jetons, Pretendard, roue d'outils) | **fait** |
 | 2.4 | Disposition (panneaux, inspecteur généré, palette virtualisée) | fait pour l'essentiel ; `Ctrl+K` et thème clair à venir |
+| 2.4d | Écrans « Texte et carte », « Relief », « Bibliothèque » | **fait** — texte par la police embarquée, image en couleurs ou en silhouette, relief à l'aller et au retour, rangement et reprise par le presse-papier du moteur |
 | 2.4c | Commandes complètes et catalogue de blocs | **fait** — les 29 opérations atteignables, champs `blocklist`/`pattern`/`mask`, presse-papier et biome branchés, raccourcis d'outil, catalogue de 346 blocs + `blocks.json` pour les `minefield:*`. Reste : les écrans « Texte et carte », « Relief » et « Bibliothèque », dont le moteur est prêt |
 | 2.4b | Réglages (texte, densité, accent) + mode performance | **fait** — `settings.json` via l'adapter, `theme.js` testé, relevé par phase |
 | 2.5 | Viewport | maillage par chunk + AO **fait** ; atlas de textures et modèles non cubiques à venir |

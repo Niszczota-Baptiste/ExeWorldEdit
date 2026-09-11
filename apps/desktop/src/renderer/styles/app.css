@@ -320,6 +320,8 @@
   font-size: var(--t-micro);
   line-height: 1.5;
 }
+/* Un avertissement se lit, il ne se devine pas : même taille, autre couleur. */
+.hint[data-tone='select'] { color: var(--select); }
 
 /* ── Palette de blocs ─────────────────────────────────────────────────────── */
 

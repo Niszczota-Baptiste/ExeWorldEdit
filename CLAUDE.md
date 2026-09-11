@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (330 tests aujourd'hui : 294 moteur, 36 desktop)
+npm test          # tous les paquets (344 tests aujourd'hui : 295 moteur, 49 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -103,6 +103,8 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Une chose qui dépend d'où vivent les données | une méthode du `StorageAdapter` + son cas dans la suite de contrat (`test/storage.test.js`) |
 | Un plafond réglable | `DEFAULT_LIMITS` + son entrée dans `LIMIT_RANGES` (`src/staging/geometry.js`), jamais une variable d'environnement. L'interface génère son champ depuis les bornes, il n'y a rien à écrire côté renderer |
 | Une capacité pour le renderer | la méthode dans `apps/desktop/src/engine/index.js`, puis son nom dans `ENGINE_METHODS` du preload |
+| Un écran d'outil (pas une opération) | un composant dans `apps/desktop/src/renderer/shell/tools/`, son entrée dans `TOOL_PANELS` (`Inspector.jsx`), et son bouton principal envoyé dans `ActionSlot` par un portail |
+| Une conversion pixels → grille | `apps/desktop/src/renderer/grid/pixels.js` (pur, testé sans navigateur) ; ce qui touche un canvas va dans `draw.js` |
 | Un outil dans l'interface | `TOOLS` et `TOOL_OPS` (`apps/desktop/src/renderer/store.js`) — l'inspecteur génère ses champs depuis le descripteur du moteur, il n'y a pas de formulaire à écrire. Un outil SANS opérations doit avoir sa note dans `TOOL_NOTES`, sinon l'inspecteur reste muet |
 | Un TYPE de paramètre d'opération | son champ dans `Field` (`Inspector.jsx`) ET son cas dans le constructeur de `params` juste au-dessus — un test exige les deux |
 | Un bloc au catalogue | `VANILLA` (`src/worldedit/blockCatalog.js`) pour du vanilla. Pour un `minefield:*` : `blocks.json` du dossier de données, jamais le code — ce dépôt ne connaît pas la liste du serveur |
@@ -117,8 +119,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 ## Ce qui n'est pas encore là
 
 Entités mobiles (`entities/*.mca`), aperçu découpé par chunk, `getBlock` sans
-allocation, les écrans des outils « Texte et carte », « Relief » et
-« Bibliothèque » (le moteur sait déjà les faire), le pinceau, et la liste réelle
+allocation, le pinceau (phase 3), et la liste réelle
 des blocs `minefield:*` — elle appartient au serveur, pas à ce dépôt, et se
 déclare dans `blocks.json`. Détail, écarts assumés avec le site et ordre
 des phases : **`docs/desktop.md`**.
@@ -260,6 +261,26 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   allocations par bloc pour une palette de dix. Un index `Map` construit une
   fois par section : × 3,5. Corollaire : les opérations parcourent en YZX, donc
   un mémo d'UNE case sur la section résolue supprime les recherches de chunk.
+- **Deux moitiés testées, leur jonction non.** `toHeights` rendait des hauteurs
+  en BLOCS ; `applyHeightmap` attend un rapport 0..1 et fait
+  `clamp01(h) * maxH`. Chaque moitié passait ses tests ; ensemble, toute
+  cellule non nulle devenait 1 — un plateau plat au sommet de la sélection à la
+  place du relief. Mesuré par l'aller-retour qui manquait : 1 022 cellules
+  fausses sur 1 024, jusqu'à 31 blocs d'écart. Une unité qui traverse une
+  frontière se vérifie EN TRAVERSANT.
+- **Un `import` qui tue le moteur tue l'application en silence.** Un nom
+  d'export erroné (`flatBlockColors` n'est pas dans `worldedit`) fait sortir
+  l'`utilityProcess` à l'import. Le principal attendait `whenReady`, qui ne se
+  résolvait jamais : pas de fenêtre, pas de message, pas de fin. `whenReady`
+  peut désormais ÉCHOUER, et l'échec ouvre un dialogue.
+- **Un `dispatchEvent('blur')` n'appelle pas le `onBlur` de React.** React
+  écoute `focusout`, qui remonte ; `blur` ne remonte pas. Il faut `focus()` puis
+  `blur()` pour de vrai — sinon la valeur est posée dans le champ et rien ne la
+  valide, ce qui se lit comme « le champ ne marche pas ».
+- **Un panneau est estampé sur toute l'ÉPAISSEUR de son axe plat.** Sur une
+  sélection cubique, « poser un panneau » a écrit 1 647 870 blocs. C'est le
+  comportement voulu (l'axe plat est la profondeur), mais rien ne le disait :
+  l'écran annonce maintenant l'épaisseur et le total.
 - **Un maillon de la chaîne qu'aucun hôte n'appelle.** Le descripteur génère
   l'interface, `normalizeParams` valide, l'opération exécute. L'application
   appelait le premier et le troisième : le normaliseur n'était invoqué NULLE

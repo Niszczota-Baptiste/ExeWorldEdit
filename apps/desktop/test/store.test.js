@@ -128,3 +128,57 @@ test('les raccourcis d’outil sont uniques et réellement écoutés', async () 
   const app = await readFile(new URL('../src/renderer/App.jsx', import.meta.url), 'utf8');
   assert.match(app, /TOOLS\.find\(/, 'App.jsx doit dériver les raccourcis de TOOLS, pas les recopier');
 });
+
+test('un outil sans opérations a soit son écran, soit une note « à venir »', async () => {
+  // Trois états possibles et pas quatre : des opérations du moteur, un écran à
+  // lui, ou l'aveu qu'il ne fait rien encore. Un outil qui n'a aucun des trois
+  // ouvre un panneau vide.
+  const { TOOL_NOTES } = await import('../src/renderer/store.js');
+  const src = await readFile(new URL('../src/renderer/shell/Inspector.jsx', import.meta.url), 'utf8');
+  const avecEcran = new Set([...src.matchAll(/^\s{2}(\w+): \w+Tool,$/gm)].map((m) => m[1]));
+  assert.ok(avecEcran.size >= 3, `TOOL_PANELS illisible depuis Inspector.jsx (${avecEcran.size} trouvés)`);
+
+  for (const t of TOOLS) {
+    if (TOOL_OPS[t.id]?.length) continue;
+    const ok = avecEcran.has(t.id) || TOOL_NOTES[t.id]?.soon || TOOL_NOTES[t.id]?.text;
+    assert.ok(ok, `${t.id} : ni opérations, ni écran, ni note`);
+    // Un outil qui a son écran n'est plus « à venir » : le rail le grisait
+    // encore alors qu'il marchait.
+    if (avecEcran.has(t.id)) assert.equal(!!t.soon, false, `${t.id} a son écran mais reste marqué « bientôt »`);
+  }
+});
+
+test('toute méthode du moteur appelée par le renderer est dans la liste blanche', async () => {
+  // Le preload est la SEULE porte du renderer vers le disque (invariant n° 6).
+  // Une méthode oubliée là ne lève pas à la compilation : elle échoue au clic.
+  const { globSync } = await import('node:fs');
+  const racine = new URL('../src/renderer/', import.meta.url);
+  const appels = new Set();
+  for (const f of globSync('**/*.{js,jsx}', { cwd: racine })) {
+    const src = await readFile(new URL(f, racine), 'utf8');
+    for (const m of src.matchAll(/\bengine\.(\w+)\(/g)) appels.add(m[1]);
+  }
+  assert.ok(appels.size > 10, `trop peu d’appels relevés (${appels.size})`);
+
+  const preload = await readFile(new URL('../src/preload/index.cjs', import.meta.url), 'utf8');
+  const bloc = preload.slice(preload.indexOf('ENGINE_METHODS'), preload.indexOf('];', preload.indexOf('ENGINE_METHODS')));
+  const blanches = new Set([...bloc.matchAll(/'(\w+)'/g)].map((m) => m[1]));
+
+  const absentes = [...appels].filter((m) => !blanches.has(m)).sort();
+  assert.deepEqual(absentes, [], 'appelées par le renderer, absentes de ENGINE_METHODS');
+});
+
+test('toute méthode de la liste blanche existe vraiment dans le moteur', async () => {
+  // L'autre sens. Un nom dans `ENGINE_METHODS` que le moteur n'implémente pas
+  // donne un pont qui répond « méthode inconnue » — au clic, jamais avant.
+  const preload = await readFile(new URL('../src/preload/index.cjs', import.meta.url), 'utf8');
+  const bloc = preload.slice(preload.indexOf('ENGINE_METHODS'), preload.indexOf('];', preload.indexOf('ENGINE_METHODS')));
+  const blanches = [...bloc.matchAll(/'(\w+)'/g)].map((m) => m[1]);
+
+  const moteur = await readFile(new URL('../src/engine/index.js', import.meta.url), 'utf8');
+  const declarees = new Set([...moteur.matchAll(/^ {2}(?:async )?(\w+)[:(]/gm)].map((m) => m[1]));
+  assert.ok(declarees.size > 20, `méthodes du moteur illisibles (${declarees.size})`);
+
+  const fantomes = blanches.filter((m) => !declarees.has(m)).sort();
+  assert.deepEqual(fantomes, [], 'exposées par le preload, absentes du moteur');
+});

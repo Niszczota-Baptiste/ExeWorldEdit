@@ -599,7 +599,7 @@ export const TERRAIN_STYLE_IDS = Object.keys(TERRAIN_STYLES);
  * opération sur la même zone redonne exactement le même résultat, même si la
  * boucle change un jour.
  */
-function hash3(x, y, z, seed) {
+export function hash3(x, y, z, seed) {
   let h = Math.imul(x | 0, 374761393)
     ^ Math.imul(y | 0, 1103515245)
     ^ Math.imul(z | 0, 668265263)

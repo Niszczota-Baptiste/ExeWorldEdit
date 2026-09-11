@@ -134,7 +134,19 @@ app.whenReady().then(async () => {
   });
 
   engine = startEngine({ onEvent: sendToRenderer });
-  await engine.whenReady;
+  try {
+    await engine.whenReady;
+  } catch (err) {
+    // Sans fenêtre et sans moteur, il n'y a rien à faire de plus qu'un
+    // dialogue : l'alternative est une icône dans la barre des tâches qui ne
+    // s'ouvre jamais.
+    dialog.showErrorBox(
+      'Titi WorldEdit n’a pas pu démarrer',
+      `${err.message}\n\nLe détail est dans la console (« Afficher les journaux »).`,
+    );
+    app.exit(1);
+    return;
+  }
 
   // Un seul canal vers le moteur : le preload n'expose qu'une liste blanche de
   // méthodes, et le renderer ne peut rien invoquer d'autre.
@@ -245,6 +257,32 @@ app.whenReady().then(async () => {
     };
   });
 
+  /**
+   * Choisit une image et rend ses OCTETS. Le renderer la décode lui-même (il a
+   * un canvas ; le moteur n'en a pas), mais il ne lit pas le disque : c'est le
+   * processus principal qui ouvre le dialogue et qui lit — invariant n° 6.
+   */
+  ipcMain.handle('shell:openImage', async () => {
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Choisir une image',
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }],
+    });
+    if (res.canceled || !res.filePaths[0]) return null;
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin issu du dialogue « Ouvrir » du système
+    const buffer = fs.readFileSync(res.filePaths[0]);
+    return { name: path.basename(res.filePaths[0]), bytes: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) };
+  });
+
+  /** Enregistre une image produite par le renderer (relief exporté). */
+  ipcMain.handle('shell:savePng', async (_e, { bytes, defaultName = 'relief.png' }) => {
+    const res = await dialog.showSaveDialog(win, { title: 'Enregistrer le relief', defaultPath: defaultName });
+    if (res.canceled || !res.filePath) return null;
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin issu du dialogue « Enregistrer » du système
+    fs.writeFileSync(res.filePath, Buffer.from(bytes));
+    return { path: res.filePath, bytes: bytes.byteLength ?? bytes.length };
+  });
+
   ipcMain.handle('shell:window', (_e, action) => {
     if (!win) return null;
     if (action === 'minimize') win.minimize();
@@ -261,8 +299,18 @@ app.whenReady().then(async () => {
   // cas d'un runner d'intégration continue.
   if (process.env.TITI_SCREENSHOT) {
     const delay = Number(process.env.TITI_SCREENSHOT_DELAY || 9000);
+    // Filet : une capture qui n'aboutit pas doit ÉCHOUER, pas pendre. Une des
+    // étapes ci-dessous peut rejeter (un sélecteur qui ne trouve rien, une
+    // page qui ne répond plus), et une promesse rejetée dans un `setTimeout`
+    // ne se voit nulle part : le processus reste en vie, muet, jusqu'à ce
+    // qu'on le tue à la main.
+    const secours = setTimeout(() => {
+      console.error(`✗ capture abandonnée : rien écrit après ${delay + 30000 + Number(process.env.TITI_SCREENSHOT_CLICK_WAIT || 0)} ms`);
+      app.exit(1);
+    }, delay + 30000 + Number(process.env.TITI_SCREENSHOT_CLICK_WAIT || 0));
     win.webContents.on('did-finish-load', () => {
       setTimeout(async () => {
+       try {
         // Ouverture de la roue d'outils par un VRAI événement clavier plutôt
         // qu'un crochet de test : ce qu'on capture est alors exactement ce que
         // produit la touche Espace, pas un état forcé qui pourrait mentir.
@@ -298,13 +346,40 @@ app.whenReady().then(async () => {
           })()`);
           await new Promise((r) => setTimeout(r, 500));
         }
+        // Une SÉLECTION, par les six champs de l'inspecteur. Chacun se valide
+        // à la sortie du champ (`blur`), donc on remplit et on sort — le même
+        // geste qu'à la main. « x0,y0,z0,x1,y1,z1 ».
+        if (process.env.TITI_SCREENSHOT_SELECTION) {
+          const v = process.env.TITI_SCREENSHOT_SELECTION.split(',').map((n) => n.trim());
+          await win.webContents.executeJavaScript(`(() => {
+            const champs = [...document.querySelectorAll('.sel-input')];
+            const vals = ${JSON.stringify(v)};
+            if (champs.length !== vals.length) return \`champs: \${champs.length}\`;
+            const poser = window.Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            champs.forEach((el, i) => {
+              // focus() puis blur() pour de vrai : React écoute focusout, qui
+              // remonte, et pas l'événement blur posé sur l'élément, qui ne
+              // remonte pas. Un dispatchEvent blur n'appelle donc jamais le
+              // onBlur du composant — la sélection restait entière.
+              // Pas de guillemet oblique ici : on est DANS un littéral gabarit.
+              el.focus();
+              poser.call(el, vals[i]);
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.blur();
+            });
+            return 'ok';
+          })()`);
+          await new Promise((r) => setTimeout(r, 600));
+        }
         // Un bouton de l'interface, par son sélecteur — `.click()` sur le vrai
         // élément, donc le même chemin qu'un clic de souris.
         if (process.env.TITI_SCREENSHOT_CLICK) {
           await win.webContents.executeJavaScript(
             `document.querySelector(${JSON.stringify(process.env.TITI_SCREENSHOT_CLICK)})?.click() ?? null`,
           );
-          await new Promise((r) => setTimeout(r, 600));
+          // Un clic peut LANCER quelque chose de long : 600 ms suffisent pour
+          // voir un onglet changer, pas pour laisser une opération finir.
+          await new Promise((r) => setTimeout(r, Number(process.env.TITI_SCREENSHOT_CLICK_WAIT || 600)));
         }
         // Même principe pour les réglages : Ctrl + virgule, le raccourci réel.
         if (process.env.TITI_SCREENSHOT_SETTINGS) {
@@ -314,7 +389,14 @@ app.whenReady().then(async () => {
         const image = await win.webContents.capturePage();
         // eslint-disable-next-line security/detect-non-literal-fs-filename -- chemin de capture, fourni au lancement
         fs.writeFileSync(process.env.TITI_SCREENSHOT, image.toPNG());
+        clearTimeout(secours);
         console.log(`capture écrite : ${process.env.TITI_SCREENSHOT}`);
+       } catch (err) {
+         clearTimeout(secours);
+         console.error(`✗ capture échouée : ${err?.message || err}`);
+         app.exit(1);
+         return;
+       }
         app.quit();
       }, delay);
     });

@@ -17,10 +17,10 @@ export const TOOLS = [
   { id: 'terrain', label: 'Terrain', icon: 'Mountain', key: 'G' },
   { id: 'brush', label: 'Pinceau', icon: 'Brush', key: 'P', soon: true },
   { id: 'path', label: 'Tracé', icon: 'Spline', key: 'C' },
-  { id: 'panel', label: 'Texte et carte', icon: 'Type', key: 'X', soon: true },
-  { id: 'heightmap', label: 'Relief', icon: 'Waves', key: 'H', soon: true },
+  { id: 'panel', label: 'Texte et carte', icon: 'Type', key: 'X' },
+  { id: 'heightmap', label: 'Relief', icon: 'Waves', key: 'H' },
   { id: 'measure', label: 'Mesure', icon: 'Ruler', key: 'M' },
-  { id: 'library', label: 'Bibliothèque', icon: 'Library', key: 'L', soon: true },
+  { id: 'library', label: 'Bibliothèque', icon: 'Library', key: 'L' },
 ];
 
 /**
@@ -52,10 +52,10 @@ export const TOOL_OPS = {
  */
 export const TOOL_NOTES = {
   brush: { soon: true, text: 'Peindre directement dans la vue, sans passer par une sélection. Phase 3.' },
-  panel: { soon: true, text: 'Écrire un texte ou projeter une image en blocs sur un mur plat. Le moteur sait déjà le faire (`applyPanel`) ; l’écran de saisie reste à brancher.' },
-  heightmap: { soon: true, text: 'Sculpter le relief depuis une image en niveaux de gris, et ressortir celui d’une zone. Le moteur sait déjà le faire (`applyHeightmap`) ; l’écran reste à brancher.' },
+  panel: { text: 'Écrire un texte ou projeter une image en blocs sur un mur plat.' },
+  heightmap: { text: 'Sculpter le relief depuis une image en niveaux de gris, et ressortir celui d’une zone.' },
   measure: { text: 'Les dimensions de la sélection sont au-dessus : taille en blocs et volume. Rien à appliquer.' },
-  library: { soon: true, text: 'Ranger une zone copiée et la reposer ailleurs, d’un build à l’autre. Le moteur et le pont sont prêts ; l’écran reste à brancher.' },
+  library: { text: 'Ranger une zone copiée et la reposer ailleurs, d’un build à l’autre.' },
 };
 
 export const useApp = create((set, get) => ({
@@ -325,6 +325,94 @@ export const useApp = create((set, get) => ({
     }
   },
 
+  /**
+   * Les trois outils à GRILLE — panneau, carte en blocs, relief — passent par
+   * ici. Ils ne sont pas des « opérations » du descripteur : chacun a sa
+   * méthode dans le moteur, parce que ce qu'on lui envoie n'est pas une poignée
+   * de paramètres mais une grille entière préparée par l'interface. Le reste
+   * (occupation, rafraîchissement, journal de performance, message) est
+   * exactement celui de `run`, et ne doit pas en diverger.
+   */
+  async runGrid(nom, appel) {
+    const id = get().activeId;
+    const selection = get().selection;
+    if (!id || !selection) return null;
+    set({ busy: { operation: nom, phase: 'load', pct: 0 } });
+    try {
+      const res = await appel({ id, selection });
+      await get().refreshProjects();
+      set({ geometry: await api().engine.getGeometry({ id }) });
+      get().say(`${nom} — ${(res.blocksChanged || 0).toLocaleString('fr-FR')} blocs en ${res.durationMs ?? '?'} ms.`);
+      return res;
+    } catch (e) {
+      get().say(errorText(e, nom));
+      throw e;
+    } finally {
+      set({ busy: null });
+    }
+  },
+
+  applyPanel: (params) => get().runGrid('panneau', ({ id, selection }) => api().engine.applyPanel({ id, selection, ...params })),
+  applyMapBlocks: (names) => get().runGrid('carte', ({ id, selection }) => api().engine.applyMapBlocks({ id, selection, names })),
+  applyHeightmap: (heights, params) => get().runGrid('relief', ({ id, selection }) => api().engine.applyHeightmap({ id, selection, heights, params })),
+
+  /** Relief de la sélection, en niveaux de gris. Ne modifie rien. */
+  async pullHeightmap() {
+    const id = get().activeId;
+    const selection = get().selection;
+    if (!id || !selection) return null;
+    try {
+      return await api().engine.exportHeightmap({ id, selection });
+    } catch (e) {
+      get().say(errorText(e, 'export du relief'));
+      return null;
+    }
+  },
+
+  // ── Bibliothèque ──────────────────────────────────────────────────────────
+  //
+  // Le presse-papier du moteur est le pivot : « ranger » y prend ce qu'un
+  // « Copier » vient d'y mettre, « reprendre » l'y remet pour qu'un « Coller »
+  // le pose. Rien ne transite par le renderer — un build de plusieurs millions
+  // de blocs n'a rien à faire dans le processus d'affichage.
+  library: [],
+  clipboardReady: false,
+
+  async refreshLibrary() {
+    try {
+      const [library, clipboardReady] = await Promise.all([
+        api().engine.listSchematics(),
+        api().engine.hasClipboard(),
+      ]);
+      set({ library, clipboardReady });
+      return library;
+    } catch { return []; }
+  },
+
+  async saveToLibrary(name) {
+    try {
+      await api().engine.saveSchematic({ name });
+      await get().refreshLibrary();
+      get().say(`« ${name} » rangé dans la bibliothèque.`);
+    } catch (e) { get().say(errorText(e, 'rangement')); }
+  },
+
+  async loadFromLibrary(schematicId, name) {
+    try {
+      const { sx, sy, sz } = await api().engine.loadSchematic({ schematicId });
+      set({ clipboardReady: true });
+      get().say(`« ${name} » (${sx} × ${sy} × ${sz}) est dans le presse-papier : colle avec Ctrl V.`);
+    } catch (e) { get().say(errorText(e, 'reprise')); }
+  },
+
+  async removeFromLibrary(schematicId, name) {
+    try {
+      await api().engine.removeSchematic({ schematicId });
+      await get().refreshLibrary();
+      get().say(`« ${name} » supprimé de la bibliothèque.`);
+    } catch (e) { get().say(errorText(e, 'suppression')); }
+  },
+
   async run(operation, params) {
     const id = get().activeId;
     const selection = get().selection;
@@ -346,6 +434,9 @@ export const useApp = create((set, get) => ({
           }, ...s.perfLog].slice(0, 40),
         }));
       }
+      // `copy` et `cut` remplissent le presse-papier du moteur : la bibliothèque
+      // et le message de « Coller » s'y fient, et rien d'autre ne le leur dit.
+      if (operation === 'copy' || operation === 'cut') set({ clipboardReady: true });
       get().say(`${operation} — ${res.blocksChanged.toLocaleString('fr-FR')} blocs en ${res.durationMs} ms.`);
       return res;
     } catch (e) {

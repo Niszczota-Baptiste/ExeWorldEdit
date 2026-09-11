@@ -12,6 +12,9 @@ import {
 } from '@titi/we-engine/world';
 import { schematicToSponge, schematicToLitematic } from '@titi/we-engine/worldedit';
 import { CATALOG, GROUPS, normalizeExtras } from '@titi/we-engine/blocks';
+import { renderTextSvg } from '@titi/we-engine/worldedit';
+import { flatBlockColors } from '@titi/we-engine/colors';
+import { PANEL_PRESETS } from '@titi/we-engine/staging';
 
 // LE MOTEUR — tourne dans un `utilityProcess`, jamais dans le renderer.
 //
@@ -37,6 +40,12 @@ const project = (id) => {
   if (!p) throw new Error('not_found');
   return p;
 };
+
+// Bornes du rendu de texte. Un panneau plus large que ça ne tiendrait pas dans
+// une sélection raisonnable, et un suréchantillonnage démesuré ferait fabriquer
+// un SVG de plusieurs mégaoctets pour le traverser aussitôt.
+const clampSide = (v) => Math.max(1, Math.min(1024, Math.round(Number(v)) || 1));
+const clampSS = (v) => Math.max(1, Math.min(8, Math.round(Number(v)) || 1));
 
 /** Ce que l'interface a besoin de savoir d'un projet, et rien de plus. */
 const projectState = (p) => ({
@@ -372,6 +381,55 @@ const methods = {
     if (patch && patch.limits) next.limits = staging.setLimits(patch.limits);
     return { ...next, limits: { ...staging.limits } };
   },
+
+  // ── Panneau, carte et relief ───────────────────────────────────────────────
+  //
+  // Ces trois-là partagent une forme : l'interface prépare une GRILLE (masque,
+  // noms de blocs, hauteurs) et le moteur l'écrit. Le découpage est volontaire —
+  // rasteriser un SVG ou décoder un PNG est le métier d'un navigateur, et le
+  // renderer en est un ; le moteur, lui, ne dépend d'aucun canvas.
+
+  /**
+   * Texte rendu en TRACÉS vectoriels, depuis la police embarquée. Le renderer
+   * n'a plus qu'à le peindre dans un canvas et à seuiller.
+   *
+   * Pourquoi pas une police du système : elle n'est pas la même partout, et le
+   * même panneau sortirait différent d'une machine à l'autre.
+   */
+  textSvg: ({ text, width, height, supersample = 3 }) => ({
+    svg: String(renderTextSvg(String(text ?? ''), clampSide(width), clampSide(height), clampSS(supersample), '#000000', '#ffffff')),
+    width: clampSide(width),
+    height: clampSide(height),
+  }),
+
+  /** Préréglages de fond (marbre blanc, noir…) — l'interface génère sa liste. */
+  panelPresets: () => Object.entries(PANEL_PRESETS).map(([id, p]) => ({ id, label: p.label, ink: p.ink })),
+
+  /**
+   * Palette de MAP ART : couleur de carte → bloc plat qui la rend. C'est la
+   * table que le renderer utilise pour convertir une image en blocs, et elle
+   * vient du moteur pour la même raison que les descripteurs d'opérations —
+   * l'interface ne doit pas tenir sa propre copie.
+   */
+  mapPalette: () => flatBlockColors(),
+
+  applyPanel: ({ id, selection, mask, inkBlock, preset, seed }) => staging.applyPanel({
+    project: project(id), selection, mask, inkBlock, preset, seed, actor: 'local',
+    onProgress: (phase, pct) => send({ event: 'progress', operation: 'panel', phase, pct }),
+  }).then((res) => ({ ...res, project: projectState(project(id)) })),
+
+  applyMapBlocks: ({ id, selection, names }) => staging.applyMapBlocks({
+    project: project(id), selection, names, actor: 'local',
+    onProgress: (phase, pct) => send({ event: 'progress', operation: 'map', phase, pct }),
+  }).then((res) => ({ ...res, project: projectState(project(id)) })),
+
+  applyHeightmap: ({ id, selection, heights, params }) => staging.applyHeightmap({
+    project: project(id), selection, heights, params, actor: 'local',
+    onProgress: (phase, pct) => send({ event: 'progress', operation: 'heightmap', phase, pct }),
+  }).then((res) => ({ ...res, project: projectState(project(id)) })),
+
+  /** Relief de la sélection, en niveaux de gris (0 = colonne vide). */
+  exportHeightmap: ({ id, selection }) => staging.exportHeightmap(project(id), selection),
 
   /**
    * Catalogue de blocs : vanilla + `minefield:*` déclarés dans `blocks.json`.

@@ -14,7 +14,17 @@ export function startEngine({ onEvent } = {}) {
   const pending = new Map();
   let seq = 0;
   let ready = null;
-  const whenReady = new Promise((resolve) => { ready = resolve; });
+  let failReady = null;
+  let started = false;
+  // `whenReady` doit pouvoir ÉCHOUER. Le processus principal l'attend avant
+  // d'ouvrir la fenêtre : un moteur qui meurt à l'import (un export renommé
+  // suffit) laissait sinon l'application sans fenêtre, sans message et sans
+  // fin — le seul indice était la trace du fils, noyée dans les avertissements
+  // de Chromium.
+  const whenReady = new Promise((resolve, reject) => {
+    ready = (msg) => { started = true; resolve(msg); };
+    failReady = reject;
+  });
 
   child.on('message', (msg) => {
     if (msg?.event) {
@@ -31,6 +41,9 @@ export function startEngine({ onEvent } = {}) {
   });
 
   child.on('exit', (code) => {
+    // Mort AVANT d'avoir dit « prêt » : c'est un échec de démarrage, et
+    // personne d'autre ne le saura.
+    if (!started) failReady(new Error(`le moteur n'a pas démarré (code ${code})`));
     // Un moteur mort ne doit pas laisser l'interface attendre indéfiniment.
     for (const { reject, timer } of pending.values()) {
       clearTimeout(timer);

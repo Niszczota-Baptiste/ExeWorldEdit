@@ -15,6 +15,7 @@
     "./colors": "./src/worldedit/blockPalette.js",
     "./operations": "./src/worldedit/operations.js",
     "./blocks": "./src/worldedit/blockCatalog.js",
+    "./geometry": "./src/staging/geometry.js",
     "./blockstates": "./src/worldedit/blockstates.js",
     "./assets/*": "./assets/*"
   },

@@ -15,7 +15,7 @@ import {
   opMirror, opMirrorCopy, opRotate, opTranslate, opReplace, opSet, opCopy, opPaste, opCut,
   opWalls, opFaces, opHollow, opOverlay, opNaturalize, opStack, opSphere, opCyl, opSmooth, opScale, opMix,
   opLine, opPyramid, opCone, opErode, opDilate, opDrain, opBiome, opPath, opTerrain,
-  MaskedVolume, sameBlock,
+  MaskedVolume, sameBlock, hash3,
 } from '../worldedit/transform.js';
 import { normalizeParams } from '../worldedit/operations.js';
 import {
@@ -577,7 +577,7 @@ export function createStaging(adapter, options = {}) {
    * Écrit un panneau plat : `mask` (1 = bloc d'écriture, 0 = fond) indexé v*w+u.
    * `random` est injectable pour rendre le fond marbré reproductible.
    */
-  async function applyPanel({ project, selection, mask, inkBlock, preset = 'white_marble', actor, onProgress, random }) {
+  async function applyPanel({ project, selection, mask, inkBlock, preset = 'white_marble', actor, onProgress, random, seed }) {
     const startedAt = Date.now();
     const sel = checkSelection(selection, editLimits(project));
     const pal = PANEL_PRESETS[preset] || PANEL_PRESETS.white_marble;
@@ -589,14 +589,23 @@ export function createStaging(adapter, options = {}) {
     const store = loadStore(project);
     await store.warmup(buildExtent(project));
     onProgress?.('apply', 30); await tick();
-    const pick = weightedPicker(pal.bg, random);
+    // Le fond « marbre » est un tirage pondéré PAR CASE. Il se hache sur la
+    // position, comme tous les autres tirages par bloc du moteur (invariant
+    // n° 4) : `weightedPicker` retombait sinon sur `Math.random`, et deux
+    // panneaux identiques ne l'étaient jamais. Un générateur injecté reste
+    // accepté — les tests s'en servent.
+    const sd = Number.isFinite(seed) ? (seed | 0) : 1337;
+    let cur = { x: 0, y: 0, z: 0 };
+    const pick = weightedPicker(pal.bg, random || (() => hash3(cur.x, cur.y, cur.z, sd)));
     let changed = 0;
     for (let v = 0; v < h; v++) {
       for (let u = 0; u < w; u++) {
-        const block = mask[v * w + u] === 1 ? ink : pick();
         const pos = { x: 0, y: 0, z: 0 };
         pos[uAxis] = sel.min[uAxis] + u;
         pos[vAxis] = invertV ? sel.max[vAxis] - v : sel.min[vAxis] + v;
+        pos[flat] = sel.min[flat];
+        cur = pos;
+        const block = mask[v * w + u] === 1 ? ink : pick();
         for (let t = sel.min[flat]; t <= sel.max[flat]; t++) {
           pos[flat] = t;
           if (!sameBlock(store.getBlock(pos.x, pos.y, pos.z), block)) {
