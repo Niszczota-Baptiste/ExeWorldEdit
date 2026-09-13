@@ -710,15 +710,15 @@ test('la graine survit au normaliseur de chaque opération qui en a une', async 
   const { OPERATIONS, normalizeParams } = await import('../src/worldedit/operations.js');
 
   const withSeed = OPERATIONS.filter((op) => op.params.some((p) => p.name === 'seed'));
-  assert.deepEqual(withSeed.map((o) => o.id).sort(), ['mix', 'naturalize', 'terrain']);
+  // Le point de repère : ajouter une opération à graine passe forcément ici.
+  assert.deepEqual(withSeed.map((o) => o.id).sort(), ['flora', 'mix', 'naturalize', 'terrain']);
 
-  const echantillons = {
-    mix: { pattern: [{ name: 'minecraft:stone', weight: 1 }] },
-    naturalize: { preset: 'plains' },
-    terrain: { style: 'collines' },
-  };
+  // Les échantillons viennent de la fixture PARTAGÉE et non d'une seconde table
+  // écrite ici : deux tables décrivant les mêmes paramètres finissent toujours
+  // par diverger, et c'est ce test-là qui cesserait alors de prouver quoi que
+  // ce soit.
   for (const op of withSeed) {
-    const out = normalizeParams(op.id, { ...echantillons[op.id], seed: 4242 });
+    const out = normalizeParams(op.id, { ...ECHANTILLONS_UI[op.id], seed: 4242 });
     assert.equal(out.seed, 4242, `${op.id} : le normaliseur jette la graine`);
   }
   // `naturalize` avait deux sorties, dont une qui ne recopiait que `preset`.

@@ -15,6 +15,7 @@ import {
   opMirror, opMirrorCopy, opRotate, opTranslate, opReplace, opSet, opCopy, opPaste, opCut,
   opWalls, opFaces, opHollow, opOverlay, opNaturalize, opStack, opSphere, opCyl, opSmooth, opScale, opMix,
   opLine, opPyramid, opCone, opErode, opDilate, opDrain, opBiome, opPath, opTerrain,
+  opCenter, opExtinguish, opSnow, opThaw, opGreen, opFlora, opFixLiquid,
   MaskedVolume, sameBlock, hash3, matchesAt,
 } from '../worldedit/transform.js';
 import { normalizeParams } from '../worldedit/operations.js';
@@ -69,6 +70,13 @@ const OPS = {
   biome: (store, sel, p) => opBiome(store, sel, p),
   path: (store, sel, p) => opPath(store, sel, p),
   terrain: (store, sel, p) => opTerrain(store, sel, p),
+  center: (store, sel, p) => opCenter(store, sel, p),
+  extinguish: (store, sel) => opExtinguish(store, sel),
+  snow: (store, sel) => opSnow(store, sel),
+  thaw: (store, sel) => opThaw(store, sel),
+  green: (store, sel) => opGreen(store, sel),
+  flora: (store, sel, p) => opFlora(store, sel, p),
+  fixliquid: (store, sel, p) => opFixLiquid(store, sel, p),
 };
 
 export const OPERATION_NAMES = Object.keys(OPS);

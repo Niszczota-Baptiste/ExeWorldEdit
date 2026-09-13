@@ -31,9 +31,9 @@ export const TOOLS = [
  */
 export const TOOL_OPS = {
   transform: ['mirror', 'rotate', 'translate', 'stack', 'scale', 'mirrorcopy'],
-  blocks: ['set', 'replace', 'mix', 'walls', 'faces', 'hollow', 'overlay', 'drain', 'cut'],
+  blocks: ['set', 'replace', 'mix', 'walls', 'faces', 'hollow', 'overlay', 'drain', 'cut', 'center', 'extinguish'],
   shapes: ['sphere', 'cyl', 'pyramid', 'cone', 'line'],
-  terrain: ['terrain', 'naturalize', 'smooth', 'erode', 'dilate', 'biome'],
+  terrain: ['terrain', 'naturalize', 'smooth', 'erode', 'dilate', 'biome', 'green', 'flora', 'snow', 'thaw', 'fixliquid'],
   path: ['path'],
   // L'outil de sélection porte le presse-papier : c'est là qu'on a une zone
   // sous la main et rien d'autre à en faire.

@@ -9,6 +9,8 @@
 // Toutes les opérations d'écriture exigent le rôle « editor » (owner inclus) ;
 // la sélection et l'aperçu sont accessibles au « viewer ».
 
+import { FLORA_PRESETS as FLORA_IDS } from './transform.js';
+
 const DIRECTIONS = ['east', 'west', 'up', 'down', 'south', 'north'];
 
 // Biomes courants 1.20 proposés dans le menu (la saisie reste libre pour les
@@ -143,6 +145,47 @@ export const OPERATIONS = [
     id: 'drain', we: ['//drain'], label: 'Drainer (eau/lave)', minRole: 'editor', group: 'Blocs',
     description: 'Vide l’eau et la lave de la sélection (retire aussi le waterlogged).',
     params: [],
+  },
+  {
+    id: 'center', we: ['//center'], label: 'Centre', minRole: 'editor', group: 'Blocs',
+    description: 'Pose un bloc au centre EXACT de la sélection — un à huit selon la parité des côtés. Repère pour bâtir en symétrie.',
+    params: [{ name: 'block', type: 'block', label: 'Bloc' }],
+  },
+  {
+    id: 'extinguish', we: ['//extinguish'], label: 'Éteindre le feu', minRole: 'editor', group: 'Blocs',
+    description: 'Retire le feu et le feu des âmes de la sélection.',
+    params: [],
+  },
+  {
+    id: 'snow', we: ['//snow'], label: 'Enneiger', minRole: 'editor', group: 'Terrain',
+    description: 'Pose une couche de neige sur chaque surface exposée et gèle l’eau de surface. Ne pose PAS sur ce qui ne la retient pas (feuilles, verre, dalles) : en jeu elle tomberait.',
+    params: [],
+  },
+  {
+    id: 'thaw', we: ['//thaw'], label: 'Dégeler', minRole: 'editor', group: 'Terrain',
+    description: 'Retire la neige et refond la glace. L’inverse d’« Enneiger ».',
+    params: [],
+  },
+  {
+    id: 'green', we: ['//green'], label: 'Reverdir', minRole: 'editor', group: 'Terrain',
+    description: 'Remet de l’herbe sur la terre exposée. Le geste d’après-coup quand on vient de sculpter un relief.',
+    params: [],
+  },
+  {
+    id: 'flora', we: ['//flora'], label: 'Semer la flore', minRole: 'editor', group: 'Terrain',
+    description: 'Sème herbes hautes et fleurs sur les surfaces d’herbe. Rejouable à graine égale.',
+    params: [
+      { name: 'preset', type: 'enum', values: FLORA_IDS, labels: { plaine: 'Plaine (fleurs)', foret: 'Forêt (fougères)', desert: 'Désert (cactus)', neige: 'Toundra' }, default: 'plaine', label: 'Ambiance' },
+      { name: 'density', type: 'int', default: 24, label: 'Densité (%)' },
+      { name: 'seed', type: 'int', default: 0, label: 'Graine (seed)' },
+    ],
+  },
+  {
+    id: 'fixliquid', we: ['//fixwater', '//fixlava'], label: 'Mettre à niveau (eau/lave)', minRole: 'editor', group: 'Terrain',
+    description: 'Remplit jusqu’au niveau du liquide le plus haut, en partant des liquides existants. Creuser dans un lac laisse des marches : en jeu elles se comblent, dans un éditeur non.',
+    params: [
+      { name: 'liquid', type: 'enum', values: ['water', 'lava'], labels: { water: 'Eau', lava: 'Lave' }, default: 'water', label: 'Liquide' },
+    ],
   },
   {
     id: 'cut', we: ['//cut'], label: 'Couper (→ air)', minRole: 'editor', group: 'Blocs',
@@ -398,7 +441,21 @@ export function normalizeParams(operation, raw = {}) {
       }
       return out;
     }
-    case 'hollow': case 'drain': case 'copy': case 'cut': return {};
+    case 'hollow': case 'drain': case 'copy': case 'cut':
+    case 'extinguish': case 'snow': case 'thaw': case 'green': return {};
+    case 'center': {
+      const block = normBlock(raw.block);
+      return block ? { block } : 'bad_block';
+    }
+    case 'flora': {
+      return {
+        preset: FLORA_IDS.includes(raw.preset) ? raw.preset : 'plaine',
+        density: Math.max(1, Math.min(100, num(raw.density) || 24)),
+        seed: Number.isFinite(num(raw.seed)) ? num(raw.seed) : 0,
+      };
+    }
+    case 'fixliquid':
+      return { liquid: raw.liquid === 'lava' ? 'lava' : 'water' };
     case 'paste': return { mode: raw.mode === 'overwrite' ? 'overwrite' : 'overlay' };
     default: return 'unknown_operation';
   }

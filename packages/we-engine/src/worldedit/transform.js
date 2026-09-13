@@ -1114,3 +1114,285 @@ export class MemoryVolume {
     this.biomes.set(k, name); return true;
   }
 }
+
+// ── Le lot « surface » de WorldEdit ──────────────────────────────────────────
+//
+// Ces opérations existent toutes dans WorldEdit et manquaient ici. Elles ont un
+// point commun qui justifie de les écrire ensemble : elles travaillent sur la
+// SURFACE EXPOSÉE d'un terrain — le bloc le plus haut de chaque colonne qui a
+// du ciel au-dessus. C'est le geste qu'on répète après avoir sculpté un relief,
+// et le faire à la main bloc par bloc est hors de question sur un build de
+// serveur.
+//
+// La surface se cherche du haut vers le bas, et on s'arrête au premier bloc
+// plein : chercher depuis le bas trouverait le plancher d'une grotte.
+
+/**
+ * Le Y du bloc de surface d'une colonne, ou `null`.
+ *
+ * @param {number} [sousQuoi] ne considère que ce qui est SOUS ce niveau — sert
+ *   aux opérations qui doivent ignorer un couvercle (feuillage, neige déjà là).
+ */
+function surfaceY(vol, x, z, sel, sousQuoi = Infinity) {
+  const haut = Math.min(sel.max.y, sousQuoi);
+  for (let y = haut; y >= sel.min.y; y--) {
+    if (!isAirAt(vol, x, y, z)) return y;
+  }
+  return null;
+}
+
+/** Parcourt chaque colonne de la sélection et sa surface. */
+function parSurface(vol, sel, fn) {
+  let c = 0;
+  for (let z = sel.min.z; z <= sel.max.z; z++) {
+    for (let x = sel.min.x; x <= sel.max.x; x++) {
+      const y = surfaceY(vol, x, z, sel);
+      if (y === null) continue;
+      c += fn(x, y, z) || 0;
+    }
+  }
+  return c;
+}
+
+const nom = (b) => (b?.Name || '').replace(/^minecraft:/, '');
+
+/**
+ * `//center` — pose un bloc au CENTRE de la sélection.
+ *
+ * Un à huit blocs selon la parité de chaque côté : le centre d'une longueur
+ * paire tombe entre deux cases, et WorldEdit pose alors les deux. C'est ce qui
+ * en fait un repère utilisable pour bâtir en symétrie — arrondir d'un côté
+ * décalerait tout ce qu'on construit ensuite.
+ */
+export function opCenter(vol, sel, { block }) {
+  const b = toBlock(block); if (!b) throw new Error('bad_block');
+  const axe = (k) => {
+    const somme = sel.min[k] + sel.max[k];
+    const bas = Math.floor(somme / 2);
+    return somme % 2 === 0 ? [bas] : [bas, bas + 1];
+  };
+  let c = 0;
+  const bounds = { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } };
+  const xs = axe('x'), ys = axe('y'), zs = axe('z');
+  for (const y of ys) for (const z of zs) for (const x of xs) { vol.setBlock(x, y, z, clone(b)); c++; }
+  bounds.min = { x: xs[0], y: ys[0], z: zs[0] };
+  bounds.max = { x: xs[xs.length - 1], y: ys[ys.length - 1], z: zs[zs.length - 1] };
+  return { blocksChanged: c, bounds };
+}
+
+/** Les blocs sur lesquels la neige tient. Sur les autres elle tomberait. */
+const PORTE_NEIGE = new Set([
+  'grass_block', 'dirt', 'coarse_dirt', 'podzol', 'rooted_dirt', 'mycelium', 'dirt_path',
+  'stone', 'cobblestone', 'andesite', 'diorite', 'granite', 'deepslate', 'tuff', 'calcite',
+  'sand', 'red_sand', 'gravel', 'clay', 'sandstone', 'red_sandstone', 'terracotta',
+  'snow_block', 'packed_ice', 'blue_ice', 'ice', 'moss_block',
+]);
+
+/**
+ * `//snow` — pose une couche de neige sur chaque surface exposée, et gèle
+ * l'eau de surface.
+ *
+ * On ne pose PAS sur n'importe quoi : la neige tombe des feuilles, du verre ou
+ * d'une dalle. Poser quand même donnerait un build qui perd sa neige au premier
+ * chargement en jeu — le genre de défaut qui ne se voit qu'une fois en ligne.
+ */
+export function opSnow(vol, sel) {
+  let c = 0;
+  for (let z = sel.min.z; z <= sel.max.z; z++) {
+    for (let x = sel.min.x; x <= sel.max.x; x++) {
+      const y = surfaceY(vol, x, z, sel);
+      if (y === null || y >= sel.max.y) continue;
+      const dessous = vol.getBlock(x, y, z);
+      const n = nom(dessous);
+      if (n === 'water') {
+        vol.setBlock(x, y, z, { Name: 'minecraft:ice', Properties: null });
+        c++;
+        continue;
+      }
+      if (!PORTE_NEIGE.has(n)) continue;
+      if (!isAirAt(vol, x, y + 1, z)) continue;
+      // Même raison : `layers=1` est l'état par défaut de la neige.
+      vol.setBlock(x, y + 1, z, { Name: 'minecraft:snow', Properties: null });
+      c++;
+    }
+  }
+  return { blocksChanged: c, bounds: sel };
+}
+
+/**
+ * `//thaw` — retire la neige et refond la glace.
+ *
+ * L'inverse de `//snow`, et pas seulement pour défaire : c'est aussi comme ça
+ * qu'on récupère un terrain enneigé importé pour le rebâtir ailleurs.
+ */
+export function opThaw(vol, sel) {
+  let c = 0;
+  for (let y = sel.min.y; y <= sel.max.y; y++) {
+    for (let z = sel.min.z; z <= sel.max.z; z++) {
+      for (let x = sel.min.x; x <= sel.max.x; x++) {
+        const n = nom(vol.getBlock(x, y, z));
+        if (n === 'snow' || n === 'snow_block' || n === 'powder_snow') {
+          vol.setBlock(x, y, z, { Name: 'minecraft:air', Properties: null }); c++;
+        } else if (n === 'ice' || n === 'frosted_ice' || n === 'packed_ice' || n === 'blue_ice') {
+          vol.setBlock(x, y, z, { Name: 'minecraft:water', Properties: null }); c++;
+        }
+      }
+    }
+  }
+  return { blocksChanged: c, bounds: sel };
+}
+
+/**
+ * `//green` — remet de l'herbe sur la terre exposée.
+ *
+ * Sculpter un relief laisse de la terre nue partout où le terrain a été coupé.
+ * C'est LE geste d'après-coup, et WorldEdit en a fait une commande pour cette
+ * raison.
+ */
+export function opGreen(vol, sel) {
+  const TERRE = new Set(['dirt', 'coarse_dirt', 'rooted_dirt', 'podzol', 'dirt_path']);
+  return {
+    blocksChanged: parSurface(vol, sel, (x, y, z) => {
+      if (!TERRE.has(nom(vol.getBlock(x, y, z)))) return 0;
+      // Sans propriétés, et c'est important : `snowy=false` est l'état PAR
+      // DÉFAUT. L'écrire explicitement crée une seconde entrée de palette pour
+      // le même bloc — mesuré sur la vallée : 29 374 herbes d'un côté, 113 de
+      // l'autre. La palette se dédouble, et un « remplacer » qui vise un état
+      // exact en rate la moitié. Tout le reste du moteur (`naturalize`,
+      // `terrain`) écrit l'herbe sans propriétés.
+      vol.setBlock(x, y, z, { Name: 'minecraft:grass_block', Properties: null });
+      return 1;
+    }),
+    bounds: sel,
+  };
+}
+
+/** Ce qui pousse sur l'herbe, et avec quelle fréquence relative. */
+const FLORE = {
+  plaine: [['short_grass', 60], ['tall_grass', 10], ['dandelion', 8], ['poppy', 8], ['oxeye_daisy', 6], ['cornflower', 4], ['azure_bluet', 4]],
+  foret: [['short_grass', 62], ['fern', 14], ['lily_of_the_valley', 8], ['poppy', 8], ['brown_mushroom', 4], ['red_mushroom', 4]],
+  desert: [['dead_bush', 70], ['cactus', 30]],
+  neige: [['short_grass', 70], ['fern', 30]],
+};
+export const FLORA_PRESETS = Object.keys(FLORE);
+
+/**
+ * `//flora` — sème de l'herbe haute et des fleurs sur les surfaces d'herbe.
+ *
+ * Le tirage se hache sur la POSITION (invariant n° 4) : deux exécutions à seed
+ * égale sèment exactement la même chose, et resemer un coin de la zone y redonne
+ * les mêmes fleurs qu'un semis de la zone entière.
+ */
+export function opFlora(vol, sel, params = {}) {
+  const preset = FLORE[params.preset] ? params.preset : 'plaine';
+  const liste = FLORE[preset];
+  const total = liste.reduce((s, [, p]) => s + p, 0);
+  const densite = Math.max(0, Math.min(100, Number(params.density ?? 24))) / 100;
+  const seed = Number.isFinite(params.seed) ? (params.seed | 0) : 4242;
+  const SOL = new Set(['grass_block', 'podzol', 'mycelium', 'sand', 'red_sand']);
+
+  let c = 0;
+  for (let z = sel.min.z; z <= sel.max.z; z++) {
+    for (let x = sel.min.x; x <= sel.max.x; x++) {
+      const y = surfaceY(vol, x, z, sel);
+      if (y === null || y >= sel.max.y) continue;
+      if (!SOL.has(nom(vol.getBlock(x, y, z)))) continue;
+      if (!isAirAt(vol, x, y + 1, z)) continue;
+      // Deux tirages INDÉPENDANTS sur la même case : l'un décide s'il pousse
+      // quelque chose, l'autre quoi. Réutiliser le même ferait que la densité
+      // choisirait aussi l'espèce — les fleurs rares n'apparaîtraient qu'aux
+      // densités élevées.
+      if (hash3(x, y, z, seed) >= densite) continue;
+      let r = hash3(x, y + 1, z, seed + 7717) * total;
+      for (const [espece, poids] of liste) {
+        r -= poids;
+        if (r <= 0) {
+          vol.setBlock(x, y + 1, z, { Name: `minecraft:${espece}`, Properties: null });
+          c++;
+          break;
+        }
+      }
+    }
+  }
+  return { blocksChanged: c, bounds: sel };
+}
+
+/**
+ * `//extinguish` — éteint le feu.
+ *
+ * Trivial, et c'est le propre d'une commande de nettoyage : on la veut sous la
+ * main au lieu de bâtir une sélection et un remplacement pour trois flammes.
+ */
+export function opExtinguish(vol, sel) {
+  let c = 0;
+  for (let y = sel.min.y; y <= sel.max.y; y++) {
+    for (let z = sel.min.z; z <= sel.max.z; z++) {
+      for (let x = sel.min.x; x <= sel.max.x; x++) {
+        const n = nom(vol.getBlock(x, y, z));
+        if (n !== 'fire' && n !== 'soul_fire') continue;
+        vol.setBlock(x, y, z, { Name: 'minecraft:air', Properties: null });
+        c++;
+      }
+    }
+  }
+  return { blocksChanged: c, bounds: sel };
+}
+
+/**
+ * `//fixwater` / `//fixlava` — met un liquide À NIVEAU.
+ *
+ * Creuser dans un lac laisse des blocs d'eau « en escalier » : chaque source
+ * coule et le résultat n'est plat qu'après un tour de simulation en jeu — qu'on
+ * n'a pas dans un éditeur. On remplit donc jusqu'au niveau du liquide le plus
+ * haut de la sélection, en ne touchant qu'aux cases VIDES en contact.
+ *
+ * Le remplissage part des liquides existants et se propage de proche en proche
+ * sous le niveau : sans ça, on noierait l'intérieur d'une maison qui traîne
+ * dans la sélection.
+ */
+export function opFixLiquid(vol, sel, params = {}) {
+  const liquide = params.liquid === 'lava' ? 'lava' : 'water';
+  const plein = { Name: `minecraft:${liquide}`, Properties: null };
+
+  // 1. le niveau : le liquide le plus haut de la sélection.
+  let niveau = null;
+  const depart = [];
+  for (let y = sel.min.y; y <= sel.max.y; y++) {
+    for (let z = sel.min.z; z <= sel.max.z; z++) {
+      for (let x = sel.min.x; x <= sel.max.x; x++) {
+        if (nom(vol.getBlock(x, y, z)) !== liquide) continue;
+        niveau = niveau === null ? y : Math.max(niveau, y);
+        depart.push(x, y, z);
+      }
+    }
+  }
+  if (niveau === null) return { blocksChanged: 0, bounds: sel };
+
+  // 2. propagation depuis les liquides, sous le niveau, dans les cases d'air.
+  const vus = new Set();
+  const file = [];
+  for (let i = 0; i < depart.length; i += 3) {
+    if (depart[i + 1] <= niveau) file.push(depart[i], depart[i + 1], depart[i + 2]);
+  }
+  const VOISINS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  let c = 0;
+  let tete = 0;
+  while (tete < file.length) {
+    const x = file[tete], y = file[tete + 1], z = file[tete + 2];
+    tete += 3;
+    for (const [dx, dy, dz] of VOISINS) {
+      const nx = x + dx, ny = y + dy, nz = z + dz;
+      if (ny > niveau) continue;
+      if (nx < sel.min.x || nx > sel.max.x || ny < sel.min.y || ny > sel.max.y
+        || nz < sel.min.z || nz > sel.max.z) continue;
+      const cle = `${nx},${ny},${nz}`;
+      if (vus.has(cle)) continue;
+      vus.add(cle);
+      if (!isAirAt(vol, nx, ny, nz)) continue;
+      vol.setBlock(nx, ny, nz, clone(plein));
+      c++;
+      file.push(nx, ny, nz);
+    }
+  }
+  return { blocksChanged: c, bounds: sel };
+}

@@ -37,4 +37,11 @@ export const ECHANTILLONS_UI = {
   terrain: { style: 'montagne', amplitude: 70, scale: 48, seed: 9, palette: 'custom', clearAbove: false, surface: { name: 'minecraft:snow_block' }, soil: { name: 'minecraft:dirt' }, filler: { name: 'minecraft:stone' } },
   copy: {},
   paste: { mode: 'overwrite' },
+  center: { block: { name: 'minecraft:gold_block' } },
+  extinguish: {},
+  snow: {},
+  thaw: {},
+  green: {},
+  flora: { preset: 'foret', density: 30, seed: 11 },
+  fixliquid: { liquid: 'lava' },
 };

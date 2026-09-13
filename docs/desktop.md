@@ -2056,6 +2056,64 @@ lui, peint toujours au clic gauche — 774 blocs, remaillage local en 312 ms.
 
 ---
 
+## Le lot « surface » de WorldEdit
+
+Sept commandes que WorldEdit a et qui manquaient ici. Elles ont un point commun
+qui justifie de les écrire ensemble : elles travaillent sur la **surface
+exposée** d'un terrain — le bloc le plus haut de chaque colonne qui a du ciel
+au-dessus. C'est le geste qu'on répète après avoir sculpté un relief, et le
+faire à la main est hors de question sur un build de serveur.
+
+| commande | ce qu'elle fait |
+|---|---|
+| `//center` | pose un bloc au centre exact — un à huit selon la parité |
+| `//snow` | une couche de neige sur chaque surface, gèle l'eau |
+| `//thaw` | l'inverse : retire la neige, refond la glace |
+| `//green` | remet de l'herbe sur la terre exposée |
+| `//flora` | sème herbes hautes et fleurs, rejouable à graine égale |
+| `//extinguish` | retire le feu |
+| `//fixwater` `//fixlava` | met un liquide à niveau |
+
+### Ce que chacune refuse de faire
+
+- **`//snow` ne pose pas sur n'importe quoi.** La neige tombe des feuilles, du
+  verre, d'une dalle. Poser quand même donnerait un build qui perd sa neige au
+  premier chargement en jeu — le genre de défaut qui ne se voit qu'une fois en
+  ligne. Sur l'eau, elle gèle au lieu de se poser dessus.
+- **`//center` pose HUIT blocs sur une sélection paire.** Le centre d'une
+  longueur paire tombe entre deux cases ; arrondir d'un côté décalerait tout ce
+  qu'on bâtit ensuite en symétrie. Ses `bounds` couvrent ce qui a été écrit et
+  non la sélection : l'instantané d'annulation et l'aperçu incrémental s'y fient.
+- **`//flora` tire DEUX fois par case,** indépendamment : une fois pour savoir
+  s'il pousse quelque chose, une fois pour savoir quoi. Réutiliser le même
+  tirage ferait que la densité choisirait aussi l'espèce, et les fleurs rares
+  n'apparaîtraient qu'aux densités élevées.
+- **`//fixwater` ne noie pas ce qui est fermé.** Le remplissage part des
+  liquides EXISTANTS et se propage de proche en proche sous le niveau : une
+  maison qui traîne dans la sélection reste sèche.
+
+### Le défaut que la mesure a trouvé
+
+Après avoir lancé les cinq opérations sur la vallée, la palette annonçait
+**29 374 herbes d'un côté et 113 de l'autre**. `opGreen` écrivait
+`grass_block[snowy=false]` — l'état par défaut, explicite — là où tout le reste
+du moteur écrit `grass_block` sans propriétés. Deux entrées de palette pour le
+même bloc : la palette se dédouble, et un « remplacer » visant un état exact en
+rate la moitié.
+
+Trois tests le refusent désormais, tous vérifiés en échec sur le code fautif.
+Même correction pour la neige, dont `layers=1` est aussi l'état par défaut.
+
+### Ce qui manque encore
+
+`//forest` et `//flora` de WorldEdit vont ensemble ; seul le second est là. Les
+arbres demandent des formes d'arbre — un sous-système à part entière, et le
+bâcler donnerait des troncs sans houppier. De même `//deform` et `//generate`,
+qui prennent une EXPRESSION mathématique : il y faut un analyseur, pas un coin
+de commit.
+
+---
+
 ## Écarts assumés avec le moteur du site
 
 | Sujet | Site | Ici | Pourquoi |

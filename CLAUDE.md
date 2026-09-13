@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (493 tests aujourd'hui : 348 moteur, 145 desktop)
+npm test          # tous les paquets (521 tests aujourd'hui : 376 moteur, 145 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -508,6 +508,12 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   fixe — gauche à l'outil s'il en veut, DROIT toujours à la caméra, molette au
   zoom. Corollaire : le clic droit servant à pivoter, il faut annuler le menu
   contextuel, sinon il s'ouvre à chaque relâchement.
+- **Écrire un état PAR DÉFAUT dédouble la palette.** `opGreen` posait
+  `grass_block[snowy=false]` quand tout le reste du moteur écrit `grass_block`
+  sans propriétés : mesuré sur la vallée, 29 374 herbes d'un côté et 113 de
+  l'autre, deux entrées de palette pour le même bloc. La palette se dédouble, et
+  un « remplacer » visant un état exact en rate la moitié. Une opération écrit
+  un bloc comme le reste du moteur l'écrit — état par défaut omis.
 - **Le verrou `session.lock` n'est détectable que sur Windows.** Ailleurs il est
   consultatif et une ouverture réussie ne prouve rien. `probeWorldLock` renvoie
   `{ locked, reliable }` : ne jamais réduire ça à un booléen, ce serait
