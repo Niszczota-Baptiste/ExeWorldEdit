@@ -16,6 +16,13 @@ export const useApp = create((set, get) => ({
   projects: [],
   activeId: null,
   geometry: null,
+  /**
+   * Ce qui a changé depuis le dernier aperçu, en coordonnées monde — ou `null`
+   * quand tout est à refaire. C'est ce qui permet au viewport de ne remailler
+   * que les chunks touchés : un trait de pinceau coûtait DIX SECONDES sur un
+   * gros build parce qu'on refaisait tout.
+   */
+  geometryDirty: null,
   selection: null,
   tool: 'select',
   // La première opération de l'outil de départ, et pas une constante à part :
@@ -78,7 +85,7 @@ export const useApp = create((set, get) => ({
   },
 
   async activate(id) {
-    set({ activeId: id, geometry: null, selection: null, perfLog: [], auditLog: [] });
+    set({ activeId: id, geometry: null, geometryDirty: null, selection: null, perfLog: [], auditLog: [] });
     const geometry = await api().engine.getGeometry({ id });
     const project = get().projects.find((p) => p.id === id);
     set({
@@ -289,7 +296,7 @@ export const useApp = create((set, get) => ({
     }
     const reste = await get().refreshProjects({ activateFirst: false });
     if (get().activeId === id) {
-      set({ activeId: null, geometry: null, selection: null, perfLog: [], auditLog: [] });
+      set({ activeId: null, geometry: null, geometryDirty: null, selection: null, perfLog: [], auditLog: [] });
       if (reste[0]) await get().activate(reste[0].id);
     }
     get().say(`« ${p.name} » fermé.`);
@@ -399,7 +406,9 @@ export const useApp = create((set, get) => ({
         id, positions, block: get().brush.mode === 'erase' ? null : { name: get().block },
       });
       await get().refreshProjects();
-      set({ geometry: await api().engine.getGeometry({ id }) });
+      // `bounds` est l'emprise du trait : le viewport n'a que ces chunks-là à
+      // refaire. Sans elle, il jetterait tous les maillages du build.
+      set({ geometry: await api().engine.getGeometry({ id }), geometryDirty: res.bounds || null });
       if (res.blocksChanged) get().say(`Pinceau — ${res.blocksChanged.toLocaleString('fr-FR')} blocs en ${res.durationMs} ms.`);
       return res;
     } catch (e) {
@@ -535,7 +544,9 @@ export const useApp = create((set, get) => ({
       const res = await api().engine.apply({ id, operation, params, selection });
       await get().refreshProjects();
       const geometry = await api().engine.getGeometry({ id });
-      set({ geometry });
+      // Une opération rend l'emprise de ce qu'elle a écrit : même bénéfice que
+      // pour le pinceau, sur « remplir » ou « remplacer » d'une petite zone.
+      set({ geometry, geometryDirty: res.bounds || null });
       if (res.timings?.phases?.length) {
         set((s) => ({
           perfLog: [{
@@ -572,7 +583,8 @@ export const useApp = create((set, get) => ({
     try {
       await api().engine[which]({ id });
       await get().refreshProjects();
-      set({ geometry: await api().engine.getGeometry({ id }) });
+      // Annuler ne dit pas CE QUI a été restauré : tout est à refaire.
+      set({ geometry: await api().engine.getGeometry({ id }), geometryDirty: null });
       get().loadPerf(id);
       get().say(which === 'undo' ? 'Opération annulée.' : 'Opération rétablie.');
     } catch (e) {

@@ -31,6 +31,7 @@ const PANNEAUX = {
 
 export default function App() {
   const geometry = useApp((s) => s.geometry);
+  const geometryDirty = useApp((s) => s.geometryDirty);
   const project = useApp((s) => s.project());
   const layerY = useApp((s) => s.layerY);
   const setLayerY = useApp((s) => s.setLayerY);
@@ -170,6 +171,7 @@ export default function App() {
                     ? (
                       <Viewport
                         geometry={geometry}
+                        dirty={geometryDirty}
                         layerY={layerY}
                         onStats={setStats}
                         // Le pinceau n'est armé que quand son outil est choisi :

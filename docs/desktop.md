@@ -1948,6 +1948,56 @@ restent en gris uni. C'est exactement le partage voulu.
 
 ---
 
+## Le pinceau ne remaille plus tout le build
+
+Chaque trait coûtait **dix secondes** sur un gros build. Le renderer jetait
+TOUS les maillages et refaisait le build entier, alors qu'un trait ne touche
+qu'une poignée de chunks.
+
+Le moteur rendait déjà l'emprise du trait (`bounds`) — elle servait à
+l'instantané d'annulation, personne ne s'en servait côté affichage. Elle remonte
+maintenant jusqu'au viewport, qui ne refait que les chunks concernés.
+
+Trois conditions, toutes nécessaires :
+
+1. **on sait ce qui a changé.** `undo` ne le dit pas — il restaure un
+   instantané sans dire quoi —, donc il repasse par un remaillage complet ;
+2. **la palette n'a pas bougé.** Un identifiant de voxel est un indice de
+   palette : si elle change, tous les identifiants changent de sens et l'atlas
+   avec. La signature compare les NOMS dans l'ordre, pas un décompte —
+   remplacer un bloc par un autre garde le nombre d'entrées ;
+3. **il y a déjà quelque chose à l'écran.**
+
+### Trois pièges, tous invisibles à la relecture
+
+- **La marge d'une case.** Le mailleur travaille avec une couche de padding :
+  poser un bloc au bord d'un chunk change les faces visibles du chunk d'à côté.
+  Sans marge, un trait au bord laisse un mur de faces fantômes le long de la
+  frontière — et il faut tout remailler pour le faire disparaître.
+- **Un chunk qui se VIDE** ne figure plus dans la liste des chunks à mailler.
+  Effacer au pinceau laissait donc son maillage en place : les blocs supprimés
+  restaient visibles. On retire le maillage de tous les chunks VISÉS avant de
+  remailler ceux qui ont encore du contenu.
+- **Le matériau est PARTAGÉ.** Les maillages qu'on ne refait pas le référencent
+  encore ; le remplacer les afficherait en noir. En remaillage local, on garde
+  le même — ainsi que l'atlas, les formes et les teintes, dont la
+  reconstruction représentait l'autre moitié du coût.
+
+### Mesuré
+
+Vallée de démonstration, 828 887 blocs, même machine, un vrai trait de pinceau
+envoyé par de vrais événements souris :
+
+| | maillage |
+|---|---|
+| remaillage complet | 5 720 ms |
+| remaillage local | **479 ms** |
+
+**× 12.** Le trait est bien peint (828 887 → 829 644 blocs), les deux nouveaux
+chunks apparaissent, et aucune face fantôme ne subsiste aux frontières.
+
+---
+
 ## Écarts assumés avec le moteur du site
 
 | Sujet | Site | Ici | Pourquoi |

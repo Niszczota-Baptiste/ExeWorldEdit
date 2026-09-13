@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (473 tests aujourd'hui : 348 moteur, 125 desktop)
+npm test          # tous les paquets (480 tests aujourd'hui : 348 moteur, 132 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -130,9 +130,8 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 
 Entités mobiles (`entities/*.mca`), aperçu découpé par chunk, `getBlock` sans
 allocation, l'application locale du pinceau (aujourd'hui le trait part au moteur
-au relâchement), la sélection à la souris dans le
-viewport, et le remaillage LOCAL après un trait de pinceau (aujourd'hui tout le
-build est remaillé). Détail, écarts assumés avec le site et ordre des phases :
+au relâchement), et la sélection à la souris dans le
+viewport. Détail, écarts assumés avec le site et ordre des phases :
 **`docs/desktop.md`**.
 
 ## Rapport au site `titisite`
@@ -491,6 +490,18 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   l'utilisateur et le codex embarqué sont lus tous les deux ; un cache de
   lecture indexé sur le seul nom de fichier rendrait la texture de l'autre. La
   clé porte la source.
+- **Un remaillage local doit déborder d'UNE case.** Le mailleur travaille avec
+  une couche de padding : poser un bloc au bord d'un chunk change les faces
+  visibles du chunk d'à côté. Sans la marge, un trait au bord laisse un mur de
+  faces fantômes le long de la frontière, et il faut tout remailler pour le
+  faire disparaître (`chunksInBounds`).
+- **Un chunk qui se VIDE ne figure plus dans la liste des chunks.** Effacer au
+  pinceau laissait donc son maillage à l'écran : les blocs supprimés restaient
+  visibles. On retire le maillage de tous les chunks VISÉS avant de remailler
+  ceux qui ont encore du contenu.
+- **Un matériau partagé ne se libère pas à un remaillage partiel.** Les
+  maillages qu'on ne refait pas le référencent encore ; le remplacer les
+  afficherait en noir.
 - **Le verrou `session.lock` n'est détectable que sur Windows.** Ailleurs il est
   consultatif et une ouverture réussie ne prouve rien. `probeWorldLock` renvoie
   `{ locked, reliable }` : ne jamais réduire ça à un booléen, ce serait

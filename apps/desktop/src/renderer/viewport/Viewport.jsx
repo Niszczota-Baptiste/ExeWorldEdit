@@ -4,7 +4,9 @@ import { buildAtlas, makeAtlasMaterial, FACES as FACES_ATLAS } from './atlas.js'
 import { tableDesTeintes } from './tint.js';
 import { facesDesCubes, tableDesFormes, sourcesDesModeles } from './models.js';
 import * as THREE from 'three';
-import { sparseToChunks, paddedChunk, createMeshPool, CH } from './voxels.js';
+import {
+  sparseToChunks, paddedChunk, createMeshPool, chunksInBounds, paletteSignature, CH,
+} from './voxels.js';
 import { buildTables, blockColor } from './blockColors.js';
 
 // Le viewport. Un maillage PAR CHUNK, construit en worker — pas un
@@ -19,7 +21,7 @@ import { buildTables, blockColor } from './blockColors.js';
 const SKY_TOP = 0x2A3A48;
 const SKY_BOTTOM = 0x171E25;
 
-export default function Viewport({ geometry, layerY, onStats, onHover, brush, onStroke }) {
+export default function Viewport({ geometry, dirty, layerY, onStats, onHover, brush, onStroke }) {
   const hostRef = useRef(null);
   const stateRef = useRef(null);
   const [ready, setReady] = useState(false);
@@ -196,11 +198,28 @@ export default function Viewport({ geometry, layerY, onStats, onHover, brush, on
     if (!ready || !state || !geometry?.blocks?.length) return;
     let cancelled = false;
 
-    for (const mesh of state.meshes.values()) disposeMesh(state.world, mesh);
-    state.meshes.clear();
+    // Un trait de pinceau ne touche qu'une poignée de chunks. Tout remailler
+    // coûtait DIX SECONDES sur un gros build, à chaque trait — le pinceau en
+    // devenait inutilisable. On ne refait que les chunks concernés, à trois
+    // conditions : on sait ce qui a changé, la palette n'a pas bougé (sinon
+    // l'atlas et les identifiants de voxel changent), et il y a déjà quelque
+    // chose à l'écran.
+    const signature = paletteSignature(geometry.palette);
+    const local = !!dirty
+      && state.meshes.size > 0
+      && state.material
+      && signature === state.paletteSignature;
+    state.paletteSignature = signature;
+
+    const aRefaire = local ? new Set(chunksInBounds(dirty)) : null;
+
+    if (!local) {
+      for (const mesh of state.meshes.values()) disposeMesh(state.world, mesh);
+      state.meshes.clear();
+    }
 
     const chunks = sparseToChunks(geometry);
-    const { colors, opaque } = buildTables(geometry.palette);
+    const { colors, opaque } = local ? state.tables : buildTables(geometry.palette);
     state.pool ??= createMeshPool();
 
     (async () => {
@@ -222,35 +241,63 @@ export default function Viewport({ geometry, layerY, onStats, onHover, brush, on
       let atlas = null;
       let shapes = null;
       let tints = null;
-      try {
-        const formes = await window.titi.engine.blockShapes({ ids: geometry.palette.map((b) => b.name) });
-        if (Object.keys(formes).length) {
-          atlas = await buildAtlas(geometry.palette, facesDesCubes(formes), sourcesDesModeles(formes));
-          const table = tableDesFormes(geometry.palette, formes, atlas.coucheDe);
-          shapes = table.shapes;
-          // Les textures teintées du jeu sont GRISES — l'herbe, les feuilles.
-          // Sans ce facteur, le sol de tout terrain sort blanchâtre.
-          tints = tableDesTeintes(geometry.palette, formes, blockColor, atlas.moyenneDe, FACES_ATLAS);
-          // Un bloc-modèle ne CACHE pas ce qu'il y a derrière lui. Laissé
-          // opaque, il supprimait les faces de ses voisins : un escalier
-          // creusait un trou dans le mur qu'il touche.
-          for (const id of table.transparents) opaque[id] = 0;
-        }
-      } catch { atlas = null; shapes = null; tints = null; }
+      if (local) {
+        // Palette inchangée : l'atlas, les formes et les teintes sont les mêmes.
+        // Les reconstruire redemanderait au moteur de relire le pack et de
+        // décoder toutes les textures, pour un résultat identique — c'est la
+        // moitié du coût d'un trait de pinceau.
+        ({ atlas, shapes, tints } = state.rendu);
+      } else {
+        try {
+          const formes = await window.titi.engine.blockShapes({ ids: geometry.palette.map((b) => b.name) });
+          if (Object.keys(formes).length) {
+            atlas = await buildAtlas(geometry.palette, facesDesCubes(formes), sourcesDesModeles(formes));
+            const table = tableDesFormes(geometry.palette, formes, atlas.coucheDe);
+            shapes = table.shapes;
+            // Les textures teintées du jeu sont GRISES — l'herbe, les feuilles.
+            // Sans ce facteur, le sol de tout terrain sort blanchâtre.
+            tints = tableDesTeintes(geometry.palette, formes, blockColor, atlas.moyenneDe, FACES_ATLAS);
+            // Un bloc-modèle ne CACHE pas ce qu'il y a derrière lui. Laissé
+            // opaque, il supprimait les faces de ses voisins : un escalier
+            // creusait un trou dans le mur qu'il touche.
+            for (const id of table.transparents) opaque[id] = 0;
+          }
+        } catch { atlas = null; shapes = null; tints = null; }
+      }
       if (cancelled) return;
 
       // L'ancien matériau est remplacé, pas gardé : deux matériaux vivants
-      // voudraient dire deux programmes compilés pour le même build.
-      state.material?.dispose();
-      state.atlasTexture?.dispose();
-      const material = atlas
-        ? makeAtlasMaterial(atlas.texture)
-        : new THREE.MeshBasicMaterial({ vertexColors: true });
-      state.material = material;
-      state.atlasTexture = atlas?.texture || null;
+      // voudraient dire deux programmes compilés pour le même build. En
+      // remaillage local, on GARDE le même : les maillages qu'on ne refait pas
+      // le référencent encore, et le libérer les afficherait en noir.
+      let material;
+      if (local) {
+        material = state.material;
+      } else {
+        state.material?.dispose();
+        state.atlasTexture?.dispose();
+        material = atlas
+          ? makeAtlasMaterial(atlas.texture)
+          : new THREE.MeshBasicMaterial({ vertexColors: true });
+        state.material = material;
+        state.atlasTexture = atlas?.texture || null;
+        state.tables = { colors, opaque };
+        state.rendu = { atlas, shapes, tints };
+      }
       // Les chunks les plus proches de la caméra d'abord : le build apparaît
       // depuis le point de vue au lieu de se remplir dans un ordre arbitraire.
-      const keys = [...chunks.keys()].sort((a, b) => distToCamera(a, state.camera) - distToCamera(b, state.camera));
+      let keys = [...chunks.keys()];
+      if (local) {
+        // Un chunk touché qui s'est VIDÉ n'est plus dans la liste : il faut
+        // quand même retirer son maillage, sinon les blocs effacés restent à
+        // l'écran. On le fait pour tous les chunks visés, avant de remailler.
+        for (const key of aRefaire) {
+          const ancien = state.meshes.get(key);
+          if (ancien) { disposeMesh(state.world, ancien); state.meshes.delete(key); }
+        }
+        keys = keys.filter((k) => aRefaire.has(k));
+      }
+      keys.sort((a, b) => distToCamera(a, state.camera) - distToCamera(b, state.camera));
 
       await Promise.all(keys.map(async (key) => {
         const [cx, cy, cz] = key.split(',').map(Number);
@@ -305,7 +352,15 @@ export default function Viewport({ geometry, layerY, onStats, onHover, brush, on
           clip: state.renderer.clippingPlanes.length,
         }));
       }
-      onStats?.({ meshMs: Math.round(performance.now() - t0), chunks: state.meshes.size, quads });
+      onStats?.({
+        meshMs: Math.round(performance.now() - t0),
+        chunks: state.meshes.size,
+        // En remaillage local, `quads` ne compte que ce qui vient d'être refait :
+        // l'annoncer comme le total du build serait faux. On garde le total,
+        // corrigé de ce qui a été remplacé.
+        quads: local ? undefined : quads,
+        remaillage: local ? `${keys.length} chunk${keys.length > 1 ? 's' : ''}` : 'complet',
+      });
     })();
 
     return () => { cancelled = true; };

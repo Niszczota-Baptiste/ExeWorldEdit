@@ -132,3 +132,40 @@ export function createMeshPool(size = Math.min(4, navigator.hardwareConcurrency 
     get pending() { return queue.length; },
   };
 }
+
+/**
+ * Les clés de chunk qu'une boîte touche — avec UNE case de marge.
+ *
+ * La marge n'est pas une précaution : poser un bloc au bord d'un chunk change
+ * les faces visibles du chunk d'À CÔTÉ, puisque celui-ci maille avec une
+ * couche de ses voisins (`paddedChunk`). Sans la marge, un trait au bord
+ * laisserait un mur de faces fantômes le long de la frontière — et il faudrait
+ * remailler tout le build pour le faire disparaître.
+ *
+ * @param {{min:{x,y,z}, max:{x,y,z}}} bounds en coordonnées MONDE
+ * @returns {string[]}
+ */
+export function chunksInBounds(bounds) {
+  if (!bounds?.min || !bounds?.max) return [];
+  const axes = ['x', 'y', 'z'];
+  if (axes.some((a) => !Number.isFinite(bounds.min[a]) || !Number.isFinite(bounds.max[a]))) return [];
+  const c0 = axes.map((a) => Math.floor((bounds.min[a] - 1) / CH));
+  const c1 = axes.map((a) => Math.floor((bounds.max[a] + 1) / CH));
+  const out = [];
+  for (let cy = c0[1]; cy <= c1[1]; cy++) {
+    for (let cz = c0[2]; cz <= c1[2]; cz++) {
+      for (let cx = c0[0]; cx <= c1[0]; cx++) out.push(chunkKey(cx, cy, cz));
+    }
+  }
+  return out;
+}
+
+/**
+ * La signature d'une palette. Deux aperçus qui la partagent peuvent réutiliser
+ * le même atlas, les mêmes couleurs et les mêmes formes — donc se contenter
+ * d'un remaillage LOCAL.
+ *
+ * Un simple décompte ne suffirait pas : remplacer un bloc par un autre garde le
+ * nombre d'entrées et changerait toutes les textures.
+ */
+export const paletteSignature = (palette) => (palette || []).map((b) => b.name).join(String.fromCharCode(0));
