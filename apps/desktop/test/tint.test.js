@@ -111,7 +111,7 @@ test('le mailleur applique le facteur, et seulement sur la face teintée', () =>
   for (let q = 0; q < out.positions.length / 12; q++) {
     const a = (c, k) => out.positions[(q * 4 + c) * 3 + k];
     const plat = (k) => [0, 1, 2, 3].every((c) => a(c, k) === a(0, k));
-    let dir = null;
+    let dir;
     if (plat(1)) dir = a(0, 1) === 1 ? 'up' : 'down';
     else if (plat(0)) dir = a(0, 0) === 1 ? 'east' : 'west';
     else dir = a(0, 2) === 1 ? 'south' : 'north';
