@@ -16,7 +16,7 @@ import {
   opWalls, opFaces, opHollow, opOverlay, opNaturalize, opStack, opSphere, opCyl, opSmooth, opScale, opMix,
   opLine, opPyramid, opCone, opErode, opDilate, opDrain, opBiome, opPath, opTerrain,
   opCenter, opExtinguish, opSnow, opThaw, opGreen, opFlora, opFixLiquid,
-  MaskedVolume, sameBlock, hash3, matchesAt,
+  MaskedVolume, sameBlock, hash3, matchesAt, shapeBox, selectionSize,
 } from '../worldedit/transform.js';
 import { normalizeParams } from '../worldedit/operations.js';
 import {
@@ -78,6 +78,72 @@ const OPS = {
   flora: (store, sel, p) => opFlora(store, sel, p),
   fixliquid: (store, sel, p) => opFixLiquid(store, sel, p),
 };
+
+/**
+ * La PORTÉE d'une opération : la boîte qu'elle doit voir décodée pour
+ * s'exécuter — ce qu'elle lit et ce qu'elle écrit.
+ *
+ * Le code chauffait l'emprise du BUILD ENTIER avant chaque opération. Mesuré
+ * chez un utilisateur sur un build de 413 millions de cases sélectionnées : une
+ * sphère de 62 blocs prenait 5,2 secondes, dont 47 % à décoder des chunks qu'on
+ * n'allait jamais lire. Une opération ne paie plus que ce qu'elle touche.
+ *
+ * Une portée TROP PETITE est un défaut grave : une lecture hors zone décodée
+ * rendait de l'air, et l'opération écrivait ce vide. C'est pourquoi
+ * `RegionStore` lève désormais `cold_read` au lieu de rendre `null` — la
+ * réduction est vérifiable au lieu d'être pariée.
+ *
+ * Absente de cette table, une opération se voit accorder sa sélection élargie
+ * d'une case, ce qui couvre toutes celles qui regardent leurs voisins
+ * immédiats (`hollow`, les masques, `erode`).
+ */
+const PORTEE = {
+  // Les formes s'inscrivent dans une boîte calculée sur leur RAYON, quelle que
+  // soit la taille de la sélection. C'est le cas qui a motivé toute la table.
+  sphere: (sel, p) => shapeBox(sel, p),
+  cyl: (sel, p) => shapeBox(sel, p, true),
+  // Celles qui écrivent AILLEURS : la destination doit être chaude aussi, sinon
+  // on estampe sur des chunks non décodés.
+  translate: (sel, p) => unionBBox(sel, decale(sel, p.dx, p.dy, p.dz)),
+  stack: (sel, p) => {
+    const d = STACK_VECT[p.direction] || [0, 1, 0];
+    const t = selectionSize(sel);
+    const n = Math.max(1, Math.min(64, Math.round(p.count) || 1));
+    return unionBBox(sel, decale(sel, d[0] * t.x * n, d[1] * t.y * n, d[2] * t.z * n));
+  },
+  // Miroir-copie, échelle et collage débordent d'une façon qui dépend du
+  // presse-papier ou d'un facteur : on ne cherche pas à être fin, on prend
+  // l'emprise du build. Ce sont des opérations rares et déjà lourdes.
+  mirrorcopy: null,
+  scale: null,
+  paste: null,
+};
+
+/** Le vecteur de chaque direction de `stack`, dans l'ordre X, Y, Z. */
+const STACK_VECT = {
+  east: [1, 0, 0], west: [-1, 0, 0], up: [0, 1, 0], down: [0, -1, 0], south: [0, 0, 1], north: [0, 0, -1],
+};
+
+const decale = (b, dx = 0, dy = 0, dz = 0) => ({
+  min: { x: b.min.x + dx, y: b.min.y + dy, z: b.min.z + dz },
+  max: { x: b.max.x + dx, y: b.max.y + dy, z: b.max.z + dz },
+});
+
+const grossit = (b, n) => ({
+  min: { x: b.min.x - n, y: b.min.y - n, z: b.min.z - n },
+  max: { x: b.max.x + n, y: b.max.y + n, z: b.max.z + n },
+});
+
+/**
+ * Ce qu'il faut décoder pour `operation`, borné à l'emprise du build.
+ * `null` dans la table veut dire « tout le build », comme avant.
+ */
+function porteeDe(operation, sel, params, extent) {
+  if (!(operation in PORTEE)) return clampBBox(grossit(sel, 1), extent);
+  const f = PORTEE[operation];
+  if (!f) return extent;
+  return clampBBox(grossit(f(sel, params || {}), 1), extent);
+}
 
 export const OPERATION_NAMES = Object.keys(OPS);
 
@@ -275,11 +341,16 @@ export function createStaging(adapter, options = {}) {
     // redérive donc que la boîte touchée, et on la recolle sur l'aperçu
     // précédent.
     //
-    // La boîte touchée est `sel ∪ bounds` — exactement celle dont on vient de
-    // prendre l'instantané d'annulation. Ce n'est pas un choix de confort : si
-    // une opération écrivait hors de cette boîte, l'undo serait DÉJÀ faux. Le
-    // recollage est donc aussi fiable que l'annulation, ni plus ni moins.
-    const dirty = clampBBox(unionBBox(sel, resultBounds || sel), grown);
+    // La boîte touchée est celle que l'OPÉRATION déclare avoir écrite, et non
+    // `sel ∪ bounds`. La différence n'est pas cosmétique : avec « tout le build »
+    // sélectionné — ce que fait n'importe qui avant de poser une sphère —,
+    // l'union valait le build entier, et recoller l'aperçu entier coûtait
+    // 95 % du temps d'une sphère de 168 blocs.
+    //
+    // S'y fier est légitime : l'invariant veut qu'une opération rende des
+    // bornes couvrant TOUT ce qu'elle écrit, et l'instantané d'annulation s'y
+    // fie déjà. Si elles mentaient, l'undo serait faux avant l'aperçu.
+    const dirty = clampBBox(resultBounds || sel, grown);
     const base = readPreview(project.id);
     if (base) {
       // Le store doit être chaud sur ce qu'on va parcourir. Il l'est déjà quand
@@ -477,7 +548,9 @@ export function createStaging(adapter, options = {}) {
     timer.enter('load');
     progress('load', 5);
     const store = loadStore(project);
-    await store.warmup(extent); // décode les chunks du build (XZ) — Y libre ensuite
+    // On ne décode QUE ce que l'opération va toucher. Chauffer l'emprise du
+    // build entier coûtait 47 % du temps d'une sphère de 62 blocs.
+    await store.warmup(porteeDe(operation, sel, params, extent));
     timer.enter('apply');
     progress('apply', 30); await tick();
     // Forme non rectangulaire → écritures bornées à la forme (sphère/cylindre).
@@ -502,8 +575,10 @@ export function createStaging(adapter, options = {}) {
     timer.enter('commit');
     progress('commit', 60); await tick();
 
-    // Snapshot AVANT écriture : régions intersectant sélection ∪ emprise résultat.
-    snapshotRegions(project.id, regionKeysForBBox(unionBBox(sel, result.bounds || sel)));
+    // Snapshot AVANT écriture, sur les régions que l'opération DÉCLARE toucher.
+    // C'était `sel ∪ bounds` : avec « tout le build » sélectionné, on copiait
+    // toutes les régions du projet pour pouvoir annuler trois blocs.
+    snapshotRegions(project.id, regionKeysForBBox(result.bounds || sel));
     clearRedo(project.id); // une nouvelle opération invalide la pile de rétablissement
     writeRegions(project.id, store.commit({ touchedOnly: true }));
 

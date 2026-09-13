@@ -154,7 +154,20 @@ export class RegionStore {
     const region = this._regionAt(cx, cz);
     if (!region || !region.chunks) return null;
     const rec = region.chunks.get(`${cx},${cz}`);
-    if (!rec || !rec.sections) return null;
+    if (!rec) return null;
+    // DEUX cas opposés, longtemps confondus dans un seul `return null` :
+    //
+    //   pas de chunk ici          légitimement de l'air — hors du monde, ou
+    //                             une zone jamais générée ;
+    //   chunk présent, PAS décodé une lecture hors de la zone réchauffée, donc
+    //                             un défaut de programmation.
+    //
+    // Les confondre rendait de l'air dans le second cas : une opération qui
+    // déborde de son `warmup` lisait du vide là où il y a de la pierre, et
+    // l'écrivait. Corruption silencieuse, impossible à voir en relecture. Ce
+    // qui suit la rend bruyante — et c'est ce qui permet de RÉDUIRE les zones
+    // réchauffées sans jouer sa chance.
+    if (!rec.sections) throw new Error('cold_read');
 
     let sec = rec.sections.get(sy);
     if (!sec && create) {

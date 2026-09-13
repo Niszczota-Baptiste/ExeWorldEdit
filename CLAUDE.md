@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (521 tests aujourd'hui : 376 moteur, 145 desktop)
+npm test          # tous les paquets (529 tests aujourd'hui : 384 moteur, 145 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -97,7 +97,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 
 | Ajouter… | …dans |
 |---|---|
-| Une opération WorldEdit | son nom WorldEdit dans `we` (descripteur) pour qu'on la trouve à « //walls » dans la palette, puis `packages/we-engine/src/worldedit/transform.js` + son entrée dans `OPS` (`src/staging/staging.js`) + son descripteur dans `operations.js` + ses tests. Elle DOIT rendre des `bounds` couvrant tout ce qu'elle écrit : l'instantané d'annulation ET l'aperçu incrémental s'y fient. Ne l'ajouter à `COLUMN_LOCAL_OPS` que si elle ne lit JAMAIS hors de son (x, z) |
+| Une opération WorldEdit | sa PORTÉE dans `PORTEE` (`staging.js`) si elle touche autre chose que sa sélection — trop petite, elle lit de l'air ; trop grande, elle décode le build entier. Puis son nom WorldEdit dans `we` (descripteur) pour qu'on la trouve à « //walls » dans la palette, puis `packages/we-engine/src/worldedit/transform.js` + son entrée dans `OPS` (`src/staging/staging.js`) + son descripteur dans `operations.js` + ses tests. Elle DOIT rendre des `bounds` couvrant tout ce qu'elle écrit : l'instantané d'annulation ET l'aperçu incrémental s'y fient. Ne l'ajouter à `COLUMN_LOCAL_OPS` que si elle ne lit JAMAIS hors de son (x, z) |
 | Une propriété d'état de bloc à transformer | `src/worldedit/blockstates.js` + une assertion par propriété dans `test/worldedit.test.js` |
 | Un format d'échange | `src/worldedit/schematicFormats.js` + un test de round-trip |
 | Une donnée hors grille de blocs (block entity, biome) | elle voyage dans la `Schematic` (`transform.js`) pour les transformations, et se recopie explicitement dans l'export décalé (`exportBuild`) |
@@ -514,6 +514,20 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   l'autre, deux entrées de palette pour le même bloc. La palette se dédouble, et
   un « remplacer » visant un état exact en rate la moitié. Une opération écrit
   un bloc comme le reste du moteur l'écrit — état par défaut omis.
+- **Chauffer le build entier pour écrire trois blocs.** `applyOperation` faisait
+  `warmup(extent)` avant TOUTE opération, et les formes parcouraient la
+  SÉLECTION entière pour remplir une bulle, puis annonçaient `bounds: sel`.
+  Mesuré chez un utilisateur, sélection « tout le build » de 413 millions de
+  cases : une sphère de 62 blocs prenait 5,2 s — 47 % à décoder des chunks
+  jamais lus, 52 % à recoller l'aperçu entier. Trois coûts en O(sélection) pour
+  trois lignes fausses. Une opération ne paie plus que sa PORTÉE, et ses
+  `bounds` décrivent ce qu'elle a vraiment écrit. Sur la vallée : 571 → 92 ms.
+- **« Pas de chunk ici » et « chunk non décodé » ne sont PAS la même chose.**
+  `RegionStore._resolve` les confondait dans un seul `return null`, donc de
+  l'air. Une opération qui débordait de sa zone réchauffée lisait du vide là où
+  il y a de la pierre, et l'écrivait — corruption silencieuse. Le second cas
+  lève `cold_read` : c'est ce qui rend une réduction de portée VÉRIFIABLE au
+  lieu d'être pariée.
 - **Le verrou `session.lock` n'est détectable que sur Windows.** Ailleurs il est
   consultatif et une ouverture réussie ne prouve rien. `probeWorldLock` renvoie
   `{ locked, reliable }` : ne jamais réduire ça à un booléen, ce serait

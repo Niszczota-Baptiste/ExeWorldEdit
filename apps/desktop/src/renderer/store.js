@@ -695,6 +695,7 @@ export const ERREURS = {
   bad_preview: 'Aperçu illisible. Relance l’opération pour le régénérer.',
   bad_litematic: 'Ce fichier .litematic est illisible.',
   zip_invalid: 'Archive zip illisible ou sans fichier de région.',
+  cold_read: 'Défaut interne : une opération a lu hors de la zone qu’elle avait annoncée. Rien n’a été écrit — signale-le, c’est un bug du moteur, pas de ton build.',
   codex_invalid: 'Le codex des blocs Minefield livré avec l’application est illisible. Réinstalle l’application ; en attendant, les blocs minefield:* s’affichent en couleur unie.',
   empty_seed: 'Aucune région à installer.',
   invalid_blank: 'Dimensions de build invalides.',

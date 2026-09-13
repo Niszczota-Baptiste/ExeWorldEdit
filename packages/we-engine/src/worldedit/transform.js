@@ -704,19 +704,52 @@ export function opStack(vol, sel, { count, direction }) {
 }
 
 // Sphère (pinceau) : remplit une boule centrée sur la sélection. `hollow` = coque.
+/**
+ * La boîte qu'une forme CENTRÉE occupe réellement dans une sélection.
+ *
+ * Elle ne dépend pas de la taille de la sélection mais du RAYON. C'est tout le
+ * problème que ces lignes règlent : `opSphere` parcourait la sélection entière
+ * pour tester la distance au centre, et annonçait ensuite `bounds: sel`. Mesuré
+ * chez un utilisateur, sur une sélection « tout le build » de 413 millions de
+ * cases : une sphère de 62 blocs prenait 5,2 secondes, dont 47 % à décoder tout
+ * le build et 52 % à recoller l'aperçu entier. Trois coûts en O(sélection) pour
+ * écrire une bulle de trois blocs de rayon.
+ *
+ * @param {boolean} [plat] rayon sur X/Z seulement — le cylindre garde la
+ *   hauteur de la sélection.
+ */
+export function shapeBox(sel, params, plat = false) {
+  const r = Math.max(1, Math.round(params?.radius) || 1);
+  const borne = (k, rayon) => {
+    const c = (sel.min[k] + sel.max[k]) / 2;
+    return [
+      Math.max(sel.min[k], Math.floor(c - rayon - 0.5)),
+      Math.min(sel.max[k], Math.ceil(c + rayon + 0.5)),
+    ];
+  };
+  const [x0, x1] = borne('x', r);
+  const [z0, z1] = borne('z', r);
+  const [y0, y1] = plat ? [sel.min.y, sel.max.y] : borne('y', r);
+  return { min: { x: x0, y: y0, z: z0 }, max: { x: x1, y: y1, z: z1 } };
+}
+
 export function opSphere(vol, sel, { block, radius, hollow }) {
   const b = toBlock(block); if (!b) throw new Error('bad_block');
   const cx = (sel.min.x + sel.max.x) / 2, cy = (sel.min.y + sel.max.y) / 2, cz = (sel.min.z + sel.max.z) / 2;
   const r = Math.max(1, Math.round(radius) || 1), r2 = (r + 0.5) * (r + 0.5), ri2 = (r - 0.5) * (r - 0.5);
+  // La boucle porte sur la BOÎTE DE LA SPHÈRE, pas sur la sélection.
+  const box = shapeBox(sel, { radius: r });
   let c = 0;
-  for (let y = sel.min.y; y <= sel.max.y; y++)
-    for (let z = sel.min.z; z <= sel.max.z; z++)
-      for (let x = sel.min.x; x <= sel.max.x; x++) {
+  for (let y = box.min.y; y <= box.max.y; y++)
+    for (let z = box.min.z; z <= box.max.z; z++)
+      for (let x = box.min.x; x <= box.max.x; x++) {
         const d2 = (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2;
         if (d2 > r2 || (hollow && d2 < ri2)) continue;
         if (!sameBlock(vol.getBlock(x, y, z), b)) { vol.setBlock(x, y, z, clone(b)); c++; }
       }
-  return { blocksChanged: c, bounds: sel };
+  // Et les bornes rendues sont celles de la SPHÈRE. Tout ce qui suit s'y fie :
+  // l'instantané d'annulation, le recollage de l'aperçu, le remaillage local.
+  return { blocksChanged: c, bounds: box };
 }
 
 // Cylindre vertical (pinceau) : disque de rayon `radius` sur toute la hauteur.
@@ -724,15 +757,18 @@ export function opCyl(vol, sel, { block, radius, hollow }) {
   const b = toBlock(block); if (!b) throw new Error('bad_block');
   const cx = (sel.min.x + sel.max.x) / 2, cz = (sel.min.z + sel.max.z) / 2;
   const r = Math.max(1, Math.round(radius) || 1), r2 = (r + 0.5) * (r + 0.5), ri2 = (r - 0.5) * (r - 0.5);
+  // Le disque est borné en X/Z par son rayon ; la hauteur reste celle de la
+  // sélection, c'est le propre d'un cylindre.
+  const box = shapeBox(sel, { radius: r }, true);
   let c = 0;
-  for (let y = sel.min.y; y <= sel.max.y; y++)
-    for (let z = sel.min.z; z <= sel.max.z; z++)
-      for (let x = sel.min.x; x <= sel.max.x; x++) {
+  for (let y = box.min.y; y <= box.max.y; y++)
+    for (let z = box.min.z; z <= box.max.z; z++)
+      for (let x = box.min.x; x <= box.max.x; x++) {
         const d2 = (x - cx) ** 2 + (z - cz) ** 2;
         if (d2 > r2 || (hollow && d2 < ri2)) continue;
         if (!sameBlock(vol.getBlock(x, y, z), b)) { vol.setBlock(x, y, z, clone(b)); c++; }
       }
-  return { blocksChanged: c, bounds: sel };
+  return { blocksChanged: c, bounds: box };
 }
 
 // Lisser (GoBrush) : adoucit la hauteur de la surface (moyenne de voisinage).
