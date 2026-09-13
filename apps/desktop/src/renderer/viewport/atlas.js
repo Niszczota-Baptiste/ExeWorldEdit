@@ -16,6 +16,23 @@ import * as THREE from 'three';
 
 export const TUILE = 16;
 
+/**
+ * Moyenne RVB des pixels OPAQUES d'une tuile.
+ *
+ * Elle sert à doser la teinte : une texture teintée est grise, et c'est le
+ * facteur qui la ramène à la couleur voulue. Les pixels transparents sont
+ * exclus — les compter ferait tendre la moyenne d'une feuille vers le noir et
+ * la teinte exploserait pour compenser.
+ */
+export function moyenneTuile(px) {
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    if (px[i + 3] < 128) continue;
+    r += px[i]; g += px[i + 1]; b += px[i + 2]; n++;
+  }
+  return n ? [r / n, g / n, b / n] : [255, 255, 255];
+}
+
 /** Rend une image dans une tuile de 16 × 16, RGBA. */
 function tuileDe(img) {
   const c = document.createElement('canvas');
@@ -111,6 +128,12 @@ export async function buildAtlas(palette, faces, extras = []) {
     return n;
   };
 
+  /** La moyenne de la tuile d'une source, pour doser sa teinte. */
+  const moyenneDe = (src) => {
+    const n = parSource.get(src);
+    return n ? moyenneTuile(tuiles[n]) : [255, 255, 255];
+  };
+
   const layers = await atlasLayers(palette, faces, coucheDe);
   // Séquentiel comme ci-dessus, et pour la même raison : c'est l'ORDRE des
   // appels qui fixe le numéro des couches.
@@ -129,7 +152,11 @@ export async function buildAtlas(palette, faces, extras = []) {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
 
-  return { texture, layers, count: tuiles.length, coucheDe: (src) => parSource.get(src) || 0 };
+  return {
+    texture, layers, count: tuiles.length,
+    coucheDe: (src) => parSource.get(src) || 0,
+    moyenneDe,
+  };
 }
 
 /**

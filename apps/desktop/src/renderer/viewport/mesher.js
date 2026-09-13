@@ -47,11 +47,15 @@ function cornerAO(side1, side2, corner) {
  *   Absente, tout va sur la couche 0 — qui est BLANCHE, donc le produit avec la
  *   couleur de sommet redonne exactement le rendu sans textures. Pas de
  *   branchement dans le nuanceur, pas de second matériau.
+ * @param {Uint8Array} [tints] table `(id * 6 + face) * 3` → facteur RVB d'une
+ *   face teintée, 255 = « ne change rien ». Les textures teintées du jeu sont
+ *   GRISES (l'herbe, les feuilles) : sans ce facteur, le sol d'un terrain sort
+ *   blanchâtre.
  * @param {(object|null)[]} [shapes] table `id` → quads d'un bloc non-cube
  *   (`models.js`), ou `null`. Ces blocs doivent être NON opaques dans `opaque`,
  *   sinon la passe gloutonne leur dessine un cube par-dessus.
  */
-export function meshChunk(ids, opaque, colors, layers, shapes) {
+export function meshChunk(ids, opaque, colors, layers, shapes, tints) {
   const positions = [];
   const shades = [];
   const rgb = [];
@@ -146,7 +150,7 @@ export function meshChunk(ids, opaque, colors, layers, shapes) {
           const id = Math.abs(m);
           const face = d * 2 + (front ? 1 : 0);
           emitQuad({
-            positions, shades, rgb, uv, lay, indices, colors, layers,
+            positions, shades, rgb, uv, lay, indices, colors, layers, tints,
             d, u, v, i, j, w, h,
             base: slice + 1,
             front, id, face,
@@ -176,7 +180,7 @@ export function meshChunk(ids, opaque, colors, layers, shapes) {
   };
 }
 
-function emitQuad({ positions, rgb, uv, lay, indices, colors, layers, d, u, v, i, j, w, h, base, front, id, face, ao }) {
+function emitQuad({ positions, rgb, uv, lay, indices, colors, layers, tints, d, u, v, i, j, w, h, base, front, id, face, ao }) {
   const p = [0, 0, 0];
   p[d] = base; p[u] = i; p[v] = j;
   const du = [0, 0, 0]; du[u] = w;
@@ -203,9 +207,12 @@ function emitQuad({ positions, rgb, uv, lay, indices, colors, layers, d, u, v, i
   // comme teinte de repli, une fois dans la texture — et tout le build sort
   // deux fois trop sombre. Vu sur la première comparaison avant/après.
   const texture = couche !== 0;
-  const r = texture ? 255 : colors[id * 3];
-  const g = texture ? 255 : colors[id * 3 + 1];
-  const b = texture ? 255 : colors[id * 3 + 2];
+  // Une face texturée ne porte que l'ombrage — SAUF si elle est teintée : la
+  // texture est alors grise et c'est le facteur qui lui donne sa couleur.
+  const t = texture && tints ? (id * 6 + face) * 3 : -1;
+  const r = texture ? (t >= 0 ? tints[t] : 255) : colors[id * 3];
+  const g = texture ? (t >= 0 ? tints[t + 1] : 255) : colors[id * 3 + 1];
+  const b = texture ? (t >= 0 ? tints[t + 2] : 255) : colors[id * 3 + 2];
   for (let c = 0; c < 4; c++) {
     const k = shade * AO_LEVELS[ao[c]];
     rgb.push(Math.min(255, r * k) | 0, Math.min(255, g * k) | 0, Math.min(255, b * k) | 0);

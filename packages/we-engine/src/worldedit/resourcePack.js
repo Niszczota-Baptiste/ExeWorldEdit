@@ -313,6 +313,12 @@ export function planModele(pack, id) {
       if (!fin) continue;
       faces[f] = {
         texture: cheminTexture(fin),
+        // `tintindex` dit que la face est TEINTÉE au rendu. Sans lui, l'herbe
+        // et les feuilles sortent grises : leurs textures le sont vraiment —
+        // `grass_block_top.png` est un gris uni (147, 147, 147) —, c'est le jeu
+        // qui les multiplie par une couleur de biome. Ignorer l'indication
+        // donnait un sol blanchâtre sur tout terrain, et rien ne le signalait.
+        tint: decl?.tintindex != null,
         // `uv` est en pixels de texture (0..16). Absent, le jeu le DÉDUIT des
         // bornes du cuboïde — c'est ce qui fait qu'une dalle montre la moitié
         // basse de sa texture et non la texture entière écrasée.

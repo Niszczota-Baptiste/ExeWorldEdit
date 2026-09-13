@@ -5,7 +5,7 @@ import { meshChunk } from './mesher.js';
 // est un mailleur qu'on ne vérifie pas.
 
 self.onmessage = (e) => {
-  const { key, ids, opaque, colors, layers, shapes, origin } = e.data;
+  const { key, ids, opaque, colors, layers, shapes, tints, origin } = e.data;
   const mesh = meshChunk(
     new Uint16Array(ids),
     new Uint8Array(opaque),
@@ -14,6 +14,7 @@ self.onmessage = (e) => {
     // Les formes sont COPIÉES et non transférées : elles servent à tous les
     // chunks, et un transfert détacherait le tampon dès le premier.
     shapes || null,
+    tints ? new Uint8Array(tints) : null,
   );
   self.postMessage(
     {

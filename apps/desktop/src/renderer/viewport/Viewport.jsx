@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { voxelFromHit, brushPositions, lineBetween, Stroke } from './brush.js';
-import { buildAtlas, makeAtlasMaterial } from './atlas.js';
+import { buildAtlas, makeAtlasMaterial, FACES as FACES_ATLAS } from './atlas.js';
+import { tableDesTeintes } from './tint.js';
 import { facesDesCubes, tableDesFormes, sourcesDesModeles } from './models.js';
 import * as THREE from 'three';
 import { sparseToChunks, paddedChunk, createMeshPool, CH } from './voxels.js';
-import { buildTables } from './blockColors.js';
+import { buildTables, blockColor } from './blockColors.js';
 
 // Le viewport. Un maillage PAR CHUNK, construit en worker — pas un
 // `InstancedMesh` par type de bloc : au-delà de quelques centaines de milliers
@@ -220,18 +221,22 @@ export default function Viewport({ geometry, layerY, onStats, onHover, brush, on
       // mailleur.
       let atlas = null;
       let shapes = null;
+      let tints = null;
       try {
         const formes = await window.titi.engine.blockShapes({ ids: geometry.palette.map((b) => b.name) });
         if (Object.keys(formes).length) {
           atlas = await buildAtlas(geometry.palette, facesDesCubes(formes), sourcesDesModeles(formes));
           const table = tableDesFormes(geometry.palette, formes, atlas.coucheDe);
           shapes = table.shapes;
+          // Les textures teintées du jeu sont GRISES — l'herbe, les feuilles.
+          // Sans ce facteur, le sol de tout terrain sort blanchâtre.
+          tints = tableDesTeintes(geometry.palette, formes, blockColor, atlas.moyenneDe, FACES_ATLAS);
           // Un bloc-modèle ne CACHE pas ce qu'il y a derrière lui. Laissé
           // opaque, il supprimait les faces de ses voisins : un escalier
           // creusait un trou dans le mur qu'il touche.
           for (const id of table.transparents) opaque[id] = 0;
         }
-      } catch { atlas = null; shapes = null; }
+      } catch { atlas = null; shapes = null; tints = null; }
       if (cancelled) return;
 
       // L'ancien matériau est remplacé, pas gardé : deux matériaux vivants
@@ -259,6 +264,7 @@ export default function Viewport({ geometry, layerY, onStats, onHover, brush, on
             colors: colors.buffer.slice(0),
             layers: atlas ? atlas.layers.buffer.slice(0) : null,
             shapes,
+            tints: tints ? tints.buffer.slice(0) : null,
           },
           [ids.buffer],
         );

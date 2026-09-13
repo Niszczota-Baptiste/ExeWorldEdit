@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (449 tests aujourd'hui : 337 moteur, 112 desktop)
+npm test          # tous les paquets (462 tests aujourd'hui : 337 moteur, 125 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -105,6 +105,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Un plafond réglable | `DEFAULT_LIMITS` + son entrée dans `LIMIT_RANGES` (`src/staging/geometry.js`), jamais une variable d'environnement. L'interface génère son champ depuis les bornes, il n'y a rien à écrire côté renderer |
 | Une capacité pour le renderer | la méthode dans `apps/desktop/src/engine/index.js`, puis son nom dans `ENGINE_METHODS` du preload |
 | Une texture au viewport | rien à écrire : l'atlas se construit depuis le pack (`viewport/atlas.js`). L'ordre des faces s'y MESURE contre le mailleur, il ne se recopie pas |
+| Une TEINTE de bloc | rien à écrire : `tintindex` remonte du modèle (`planModele`) jusqu'au mailleur, et le facteur se calcule contre la moyenne RÉELLE de la tuile (`viewport/tint.js`). Une teinte ne peut qu'assombrir — c'est une multiplication |
 | Une FORME de bloc au viewport | rien à écrire non plus : `planModele` (`worldedit/resourcePack.js`) lit les cuboïdes du pack, `viewport/models.js` en fait des quads. Un bloc non-cube doit être NON opaque, sinon il efface les faces de ses voisins |
 | Un réglage de pinceau | `BRUSH_SHAPES` / `BRUSH_MODES` (`apps/desktop/src/renderer/viewport/brush.js`) — pur, testé sans navigateur |
 | Un écran d'outil (pas une opération) | un composant dans `apps/desktop/src/renderer/shell/tools/`, son entrée dans `TOOL_PANELS` (`Inspector.jsx`), et son bouton principal envoyé dans `ActionSlot` par un portail |
@@ -470,6 +471,20 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   critère est la présence d'un cuboïde qui REMPLIT le bloc (`indiceCubePlein`) —
   à égalité, celui qui déclare le plus de faces. Quatre blocs vanilla sont
   concernés, mais l'un d'eux est la surface de tout terrain.
+- **Les textures teintées du jeu sont GRISES.** Mesuré dans le codex du site :
+  `grass_block_top.png` vaut (147, 147, 147) et `oak_leaves.png` (97, 97, 97).
+  C'est le jeu qui les multiplie par une couleur de biome, ce que la face
+  signale avec `tintindex`. En ignorant l'indication, le sol de tout terrain
+  sortait BLANCHÂTRE — la texture s'affichait, simplement pas de la bonne
+  couleur, ce qui se lit « les blocs ont la mauvaise couleur » et ne désigne pas
+  la cause. Corollaire : le facteur se divise par la moyenne réelle de la tuile,
+  sinon `gris × vert` donne un vert deux fois trop sombre. Et une teinte ne peut
+  qu'ASSOMBRIR : c'est une multiplication, la même limite que dans le jeu.
+- **Une texture de démonstration déjà colorée masque le bug qu'on veut voir.**
+  Le pack de démo écrivait une herbe verte et un `grass_block` à un seul
+  cuboïde : les deux défauts ci-dessus passaient inaperçus chez nous et
+  sortaient chez l'utilisateur. Un pack de démonstration doit reproduire le cas
+  DIFFICILE, pas le contourner.
 - **Le verrou `session.lock` n'est détectable que sur Windows.** Ailleurs il est
   consultatif et une ouverture réussie ne prouve rien. `probeWorldLock` renvoie
   `{ locked, reliable }` : ne jamais réduire ça à un booléen, ce serait

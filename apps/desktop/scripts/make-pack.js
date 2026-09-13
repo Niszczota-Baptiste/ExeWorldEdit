@@ -141,7 +141,10 @@ ecrire('assets/minecraft/models/block/grass_block.json', {
     },
   ],
 });
-ecrire('assets/minecraft/textures/block/grass_block_top.png', png16(grain([116, 156, 74], 40, 11)));
+// GRISE, comme dans le vrai jeu : c'est `tintindex` qui lui donne sa couleur au
+// rendu. Une texture déjà verte ici masquerait exactement le défaut qu'on veut
+// pouvoir reproduire — un sol blanchâtre parce que la teinte n'est pas appliquée.
+ecrire('assets/minecraft/textures/block/grass_block_top.png', png16(grain([147, 147, 147], 40, 11)));
 ecrire('assets/minecraft/textures/block/grass_block_side.png', png16((x, y) => (y < 4 ? grain([116, 156, 74], 40, 11)(x, y) : grain([134, 96, 67], 40, 5)(x, y))));
 
 // Une DALLE : pas un cube, mais vanilla.

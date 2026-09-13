@@ -793,7 +793,7 @@ const methods = {
         const faces = {};
         for (const [face, decl] of Object.entries(box.faces)) {
           const url = lire(decl.texture);
-          if (url) faces[face] = { texture: url, uv: decl.uv, rotation: decl.rotation };
+          if (url) faces[face] = { texture: url, uv: decl.uv, rotation: decl.rotation, tint: decl.tint };
         }
         if (Object.keys(faces).length) boxes.push({ from: box.from, to: box.to, faces });
       }
