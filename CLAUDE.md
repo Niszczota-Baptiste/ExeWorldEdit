@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (480 tests aujourd'hui : 348 moteur, 132 desktop)
+npm test          # tous les paquets (487 tests aujourd'hui : 348 moteur, 139 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -111,6 +111,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Un réglage de pinceau | `BRUSH_SHAPES` / `BRUSH_MODES` (`apps/desktop/src/renderer/viewport/brush.js`) — pur, testé sans navigateur |
 | Un écran d'outil (pas une opération) | un composant dans `apps/desktop/src/renderer/shell/tools/`, son entrée dans `TOOL_PANELS` (`Inspector.jsx`), et son bouton principal envoyé dans `ActionSlot` par un portail |
 | Une conversion pixels → grille | `apps/desktop/src/renderer/grid/pixels.js` (pur, testé sans navigateur) ; ce qui touche un canvas va dans `draw.js` |
+| Un outil qui prend le CLIC GAUCHE dans la vue | `controls.prendLeGauche(true)` (`viewport/Viewport.jsx`) et le relâcher au démontage. Le clic DROIT fait toujours tourner la caméra — ne jamais couper l'orbite entière, on ne pourrait plus regarder ailleurs en pleine action |
 | Un outil dans l'interface | `TOOLS` et `TOOL_OPS` (`apps/desktop/src/renderer/store.js`) — l'inspecteur génère ses champs depuis le descripteur du moteur, il n'y a pas de formulaire à écrire. Un outil SANS opérations doit avoir sa note dans `TOOL_NOTES`, sinon l'inspecteur reste muet |
 | Un TYPE de paramètre d'opération | son champ dans `Field` (`Inspector.jsx`) ET son cas dans le constructeur de `params` juste au-dessus — un test exige les deux |
 | Un bloc au catalogue | `VANILLA` (`src/worldedit/blockCatalog.js`) pour du vanilla. Les `minefield:*` viennent du CODEX embarqué (`assets/codex-minefield.zip`), réextrait du site par `npm run codex` — rien à configurer. Un pack désigné dans les réglages les recouvre. `blocks.json` reste pour ce qui n'est ni dans l'un ni dans l'autre |
@@ -130,8 +131,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 
 Entités mobiles (`entities/*.mca`), aperçu découpé par chunk, `getBlock` sans
 allocation, l'application locale du pinceau (aujourd'hui le trait part au moteur
-au relâchement), et la sélection à la souris dans le
-viewport. Détail, écarts assumés avec le site et ordre des phases :
+au relâchement), Détail, écarts assumés avec le site et ordre des phases :
 **`docs/desktop.md`**.
 
 ## Rapport au site `titisite`
@@ -502,6 +502,12 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
 - **Un matériau partagé ne se libère pas à un remaillage partiel.** Les
   maillages qu'on ne refait pas le référencent encore ; le remplacer les
   afficherait en noir.
+- **Un outil qui coupe la caméra ENTIÈRE enferme l'utilisateur.** Le pinceau
+  faisait `setActive(false)` : plus moyen de tourner tant qu'il était choisi, et
+  n'importe quel bouton pivotait le reste du temps. Le partage est maintenant
+  fixe — gauche à l'outil s'il en veut, DROIT toujours à la caméra, molette au
+  zoom. Corollaire : le clic droit servant à pivoter, il faut annuler le menu
+  contextuel, sinon il s'ouvre à chaque relâchement.
 - **Le verrou `session.lock` n'est détectable que sur Windows.** Ailleurs il est
   consultatif et une ouverture réussie ne prouve rien. `probeWorldLock` renvoie
   `{ locked, reliable }` : ne jamais réduire ça à un booléen, ce serait

@@ -32,6 +32,8 @@ const PANNEAUX = {
 export default function App() {
   const geometry = useApp((s) => s.geometry);
   const geometryDirty = useApp((s) => s.geometryDirty);
+  const selection = useApp((s) => s.selection);
+  const setSelection = useApp((s) => s.setSelection);
   const project = useApp((s) => s.project());
   const layerY = useApp((s) => s.layerY);
   const setLayerY = useApp((s) => s.setLayerY);
@@ -178,6 +180,12 @@ export default function App() {
                         // sinon le clic gauche sert à tourner la caméra.
                         brush={tool === 'brush' && project ? { ...brush, limits: project.limits } : null}
                         onStroke={applyStroke}
+                        // La boîte de sélection est TOUJOURS dessinée ; seul le
+                        // tracé à la souris dépend de l'outil choisi.
+                        selection={selection}
+                        selecting={tool === 'select' && !!project}
+                        onSelect={setSelection}
+                        limits={project?.limits}
                       />
                     )
                     : <Empty onOpen={open} onOpenWorld={openWorld} />}
@@ -193,7 +201,14 @@ export default function App() {
                       </div>
 
                       <div className="hud hud-bl">
-                        <span className="chip">Molette pour zoomer · glisser pour pivoter · <b>ZQSD</b> pour voler</span>
+                        <span className="chip">
+                          Molette pour zoomer · <b>clic droit</b> pour pivoter · <b>ZQSD</b> pour voler
+                        </span>
+                        <span className="chip">
+                          {tool === 'select' ? 'Clic gauche : tracer la sélection'
+                            : tool === 'brush' ? 'Clic gauche : peindre'
+                              : 'Clic gauche : pivoter'}
+                        </span>
                         <span className="chip">Maintiens <b>Espace</b> pour la roue d’outils</span>
                       </div>
 

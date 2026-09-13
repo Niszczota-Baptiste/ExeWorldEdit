@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { voxelFromHit, brushPositions, lineBetween, Stroke } from './brush.js';
 import { buildAtlas, makeAtlasMaterial, FACES as FACES_ATLAS } from './atlas.js';
 import { tableDesTeintes } from './tint.js';
+import { boxFromCorners, clampBox, sameBox } from './selection.js';
 import { facesDesCubes, tableDesFormes, sourcesDesModeles } from './models.js';
 import * as THREE from 'three';
 import {
@@ -21,7 +22,10 @@ import { buildTables, blockColor } from './blockColors.js';
 const SKY_TOP = 0x2A3A48;
 const SKY_BOTTOM = 0x171E25;
 
-export default function Viewport({ geometry, dirty, layerY, onStats, onHover, brush, onStroke }) {
+export default function Viewport({
+  geometry, dirty, layerY, onStats, onHover, brush, onStroke,
+  selection, selecting, onSelect, limits,
+}) {
   const hostRef = useRef(null);
   const stateRef = useRef(null);
   const [ready, setReady] = useState(false);
@@ -105,7 +109,7 @@ export default function Viewport({ geometry, dirty, layerY, onStats, onHover, br
     if (!ready || !state) return undefined;
     const dom = state.renderer.domElement;
     const actif = !!brush;
-    state.controls.setActive(!actif);
+    state.controls.prendLeGauche(actif);
 
     // Le curseur : une boîte filaire posée sur la case visée. Sans repère
     // visuel, on vise à l'aveugle — la face touchée n'est pas celle qu'on croit
@@ -187,10 +191,117 @@ export default function Viewport({ geometry, dirty, layerY, onStats, onHover, br
       dom.removeEventListener('pointerdown', onDown);
       dom.removeEventListener('pointerup', onUp);
       dom.removeEventListener('pointerleave', onLeave);
-      state.controls.setActive(true);
+      state.controls.prendLeGauche(false);
       if (state.curseur) state.curseur.visible = false;
     };
   }, [ready, brush, onStroke]);
+
+  // ── La SÉLECTION, tracée à la souris ──────────────────────────────────────
+  //
+  // Elle ne se réglait que par les six champs de l'inspecteur : douze nombres à
+  // taper pour désigner un coin de build qu'on a sous les yeux. Et rien ne la
+  // montrait dans la vue, ce qui se lit « la sélection ne marche pas ».
+  //
+  // La boîte est TOUJOURS affichée quand une sélection existe, même quand
+  // l'outil n'est pas choisi : c'est sur quoi porteront les commandes, et ne
+  // pas le voir est la première cause d'opération lancée au mauvais endroit.
+  useEffect(() => {
+    const state = stateRef.current;
+    if (!ready || !state) return undefined;
+
+    if (!state.boite) {
+      const geo = new THREE.BoxGeometry(1, 1, 1);
+      const edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(geo),
+        // L'or de la sélection, le même que celui de l'interface. `depthTest`
+        // coupé : une boîte cachée par le build ne se sélectionne pas, elle
+        // disparaît.
+        new THREE.LineBasicMaterial({ color: 0xE3B64F, depthTest: false, transparent: true, opacity: 0.85 }),
+      );
+      edges.renderOrder = 998;
+      state.scene.add(edges);
+      state.boite = edges;
+      geo.dispose();
+    }
+
+    const montre = (box) => {
+      if (!box) { state.boite.visible = false; return; }
+      const cote = (k) => Math.max(1, box.max[k] - box.min[k] + 1);
+      state.boite.scale.set(cote('x'), cote('y'), cote('z'));
+      state.boite.position.set(
+        box.min.x + cote('x') / 2,
+        box.min.y + cote('y') / 2,
+        box.min.z + cote('z') / 2,
+      );
+      state.boite.visible = true;
+    };
+    montre(selection);
+
+    if (!selecting) return undefined;
+
+    const dom = state.renderer.domElement;
+    state.controls.prendLeGauche(true);
+
+    const ndc = new THREE.Vector2();
+    const versNdc = (e) => {
+      const r = dom.getBoundingClientRect();
+      ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      return ndc;
+    };
+    // La case SOUS la face visée, pas celle d'à côté : on sélectionne le bloc
+    // qu'on montre, pas le vide devant lui.
+    const caseVisee = (e) => {
+      const hit = pick(state, versNdc(e));
+      if (!hit) return null;
+      return {
+        x: Math.floor(hit.point.x - hit.normal.x * 0.5),
+        y: Math.floor(hit.point.y - hit.normal.y * 0.5),
+        z: Math.floor(hit.point.z - hit.normal.z * 0.5),
+      };
+    };
+
+    let coinA = null;
+    let derniere = null;
+
+    const onDown = (e) => {
+      if (e.button !== 0) return;
+      const v = caseVisee(e);
+      if (!v) return;
+      e.preventDefault();
+      dom.setPointerCapture(e.pointerId);
+      coinA = v;
+      derniere = null;
+      montre(boxFromCorners(v, v));
+    };
+    const onMove = (e) => {
+      if (!coinA) return;
+      const v = caseVisee(e);
+      // Hors du build, on garde le dernier coin valide plutôt que de faire
+      // sauter la boîte à zéro dès que le rayon passe à côté.
+      if (v) derniere = v;
+      if (derniere) montre(boxFromCorners(coinA, derniere));
+    };
+    const onUp = (e) => {
+      dom.releasePointerCapture?.(e.pointerId);
+      if (!coinA) return;
+      const box = clampBox(boxFromCorners(coinA, derniere || coinA), limits);
+      coinA = null;
+      // Un simple clic sans glisser donne une boîte d'un bloc : c'est une
+      // sélection légitime, et c'est aussi comme ça qu'on en pose une petite.
+      if (!sameBox(box, selection)) onSelect?.(box);
+      else montre(selection);
+    };
+
+    dom.addEventListener('pointerdown', onDown);
+    dom.addEventListener('pointermove', onMove);
+    dom.addEventListener('pointerup', onUp);
+    return () => {
+      dom.removeEventListener('pointerdown', onDown);
+      dom.removeEventListener('pointermove', onMove);
+      dom.removeEventListener('pointerup', onUp);
+      state.controls.prendLeGauche(false);
+    };
+  }, [ready, selection, selecting, onSelect, limits]);
 
   // ── (Re)maillage quand la géométrie change ───────────────────────────────
   useEffect(() => {
@@ -463,12 +574,23 @@ function makeOrbit(dom, camera, target) {
   const move = new THREE.Vector3();
   const keys = new Set();
   let dragging = false, lastX = 0, lastY = 0;
-  // Pendant qu'on peint, faire tourner la caméra en même temps rendrait le
-  // trait inutilisable. Le pinceau prend la main sur le bouton gauche.
-  let actif = true;
+  // Le bouton GAUCHE peut être réclamé par un outil — le pinceau, la sélection.
+  // Avant, l'outil coupait la caméra ENTIÈRE : on ne pouvait plus tourner du
+  // tout tant qu'il était choisi, et n'importe quel bouton faisait pivoter le
+  // reste du temps. Désormais le partage est net et toujours le même :
+  //
+  //   gauche  l'outil, s'il en veut ; sinon la caméra
+  //   droit   la caméra, TOUJOURS — on peut tourner en pleine action
+  //   molette le zoom, dans tous les cas
+  //
+  // C'est le partage des logiciels 3D, et c'est ce qui permet de peindre et de
+  // regarder sous un autre angle sans changer de mode.
+  let gauchePrise = false;
+
+  const orbite = (e) => e.button === 2 || e.button === 1 || (e.button === 0 && !gauchePrise);
 
   const onDown = (e) => {
-    if (!actif) return;
+    if (!orbite(e)) return;
     dragging = true; lastX = e.clientX; lastY = e.clientY; dom.setPointerCapture(e.pointerId);
   };
   const onUp = (e) => { dragging = false; dom.releasePointerCapture?.(e.pointerId); };
@@ -484,9 +606,14 @@ function makeOrbit(dom, camera, target) {
     if (e.type === 'keydown') keys.add(k); else keys.delete(k);
   };
 
+  // Le bouton droit fait tourner la caméra : le menu contextuel s'ouvrirait
+  // par-dessus à chaque relâchement.
+  const onMenu = (e) => e.preventDefault();
+
   dom.addEventListener('pointerdown', onDown);
   dom.addEventListener('pointerup', onUp);
   dom.addEventListener('pointermove', onMove);
+  dom.addEventListener('contextmenu', onMenu);
   dom.addEventListener('wheel', onWheel, { passive: false });
   window.addEventListener('keydown', onKey);
   window.addEventListener('keyup', onKey);
@@ -527,12 +654,16 @@ function makeOrbit(dom, camera, target) {
       );
       camera.lookAt(target);
     },
-    /** Le pinceau coupe l'orbite le temps d'un trait. La molette reste. */
-    setActive(v) { actif = v; if (!v) dragging = false; },
+    /**
+     * Un outil réclame le bouton gauche. Le bouton DROIT continue de faire
+     * tourner la caméra — c'est ce qui permet de peindre sans changer de mode.
+     */
+    prendLeGauche(v) { gauchePrise = !!v; if (v) dragging = false; },
     dispose() {
       dom.removeEventListener('pointerdown', onDown);
       dom.removeEventListener('pointerup', onUp);
       dom.removeEventListener('pointermove', onMove);
+      dom.removeEventListener('contextmenu', onMenu);
       dom.removeEventListener('wheel', onWheel);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onKey);

@@ -1998,6 +1998,64 @@ chunks apparaissent, et aucune face fantôme ne subsiste aux frontières.
 
 ---
 
+## La sélection se trace à la souris
+
+Elle ne se réglait que par les six champs de l'inspecteur : douze nombres à
+taper pour désigner un coin de build qu'on a sous les yeux. Et **rien ne la
+montrait dans la vue** — ce qui se lit, à juste titre, « la sélection ne marche
+pas ».
+
+### Le partage des boutons, fixe
+
+Le vrai obstacle était ailleurs : n'importe quel bouton faisait pivoter la
+caméra, et le pinceau, pour s'en sortir, coupait l'orbite ENTIÈRE. On ne
+pouvait donc plus regarder ailleurs tant qu'il était choisi. Deux défauts
+opposés, même cause : la caméra prenait tout ou rien.
+
+Le partage est désormais celui des logiciels 3D, et il ne change jamais :
+
+| | |
+|---|---|
+| **gauche** | l'outil, s'il en veut ; sinon la caméra |
+| **droit** | la caméra, **toujours** — on tourne en pleine action |
+| **molette** | le zoom, dans tous les cas |
+
+Un outil réclame le bouton gauche par `controls.prendLeGauche(true)`. Il n'y a
+pas de mode à basculer : choisir l'outil suffit, et le clic droit reste la
+caméra.
+
+Corollaire immédiat : le clic droit servant à pivoter, il faut annuler le menu
+contextuel — sinon il s'ouvre à chaque relâchement, par-dessus la vue.
+
+### Ce que le tracé décide
+
+- **les deux coins vont dans n'importe quel ordre.** On tire aussi bien vers le
+  nord-ouest que vers le sud-est ; supposer que le premier coin est le plus
+  petit donnerait une boîte vide une fois sur deux ;
+- **un clic sans glisser sélectionne un bloc.** C'est une sélection légitime, et
+  c'est comme ça qu'on en pose une petite ;
+- **hors du build, on garde le dernier coin valide** plutôt que de faire sauter
+  la boîte à zéro dès que le rayon passe à côté ;
+- **la boîte est serrée dans la hauteur du monde.** Un glisser qui sort par le
+  haut proposerait une sélection au-dessus du plafond : le moteur la refuserait,
+  après coup et sans qu'on comprenne pourquoi.
+
+### La boîte est toujours visible
+
+Même quand l'outil de sélection n'est pas choisi. C'est sur elle que portent les
+commandes, et ne pas la voir est la première cause d'opération lancée au mauvais
+endroit. `depthTest` est coupé : une boîte cachée par le build ne se
+sélectionne pas, elle disparaît.
+
+### Vérifié par un vrai glisser
+
+De vrais événements souris dans la fenêtre rendue : la boîte apparaît, les six
+champs de l'inspecteur passent à 70, 56, 126 → 169, 78, 142, la barre d'état
+annonce 39 100 blocs sélectionnés, et **la caméra n'a pas bougé**. Le pinceau,
+lui, peint toujours au clic gauche — 774 blocs, remaillage local en 312 ms.
+
+---
+
 ## Écarts assumés avec le moteur du site
 
 | Sujet | Site | Ici | Pourquoi |
