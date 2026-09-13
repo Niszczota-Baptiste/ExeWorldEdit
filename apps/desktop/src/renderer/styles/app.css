@@ -24,7 +24,21 @@
      Ailleurs, `env()` retombe sur ses valeurs par défaut et la réserve vaut 0. */
   padding-right: calc(100% - env(titlebar-area-width, 100%) - env(titlebar-area-x, 0px));
 }
-.titlebar > * { -webkit-app-region: no-drag; }
+/* Ce qui se CLIQUE n'est pas déplaçable, et rien d'autre.
+ *
+ * La règle était `.titlebar > * { no-drag }` : tous les enfants directs, donc
+ * `.tabs` — qui porte `flex: 1` et occupe TOUT l'espace libre de la barre. Il
+ * ne restait pour attraper la fenêtre que le logo, une centaine de pixels. La
+ * fenêtre paraissait collée à sa place.
+ *
+ * Les conteneurs restent déplaçables ; seuls les éléments interactifs se
+ * retirent. Un bouton laissé en `drag` ne répond pas au clic — c'est l'erreur
+ * inverse, tout aussi silencieuse. */
+.titlebar button,
+.titlebar input,
+.titlebar .tab,
+.titlebar [role='tab'] { -webkit-app-region: no-drag; }
+.titlebar .tabs { -webkit-app-region: drag; }
 
 .brand {
   display: flex;

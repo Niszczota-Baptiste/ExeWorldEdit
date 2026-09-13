@@ -101,14 +101,45 @@ Object.entries(CUBES).forEach(([nom, couleur], i) => {
 });
 
 // Un bloc à faces DIFFÉRENTES, pour vérifier que chaque face prend la sienne.
+//
+// Et surtout : sa forme RÉELLE, à DEUX cuboïdes — le cube, puis la couche
+// d'herbe teintée sur les quatre côtés. Le pack déclarait un cube simple, ce
+// qui était commode et faux : le classement « cube / modèle » passait ici alors
+// qu'il échouait sur le vrai jeu, où `grass_block` perdait son opacité et
+// faisait mailler tout l'intérieur des terrains. Un pack de démonstration qui
+// simplifie le cas difficile ne démontre rien.
 ecrire('assets/minecraft/blockstates/grass_block.json', { variants: { 'snowy=false': { model: 'minecraft:block/grass_block' } } });
 ecrire('assets/minecraft/models/block/grass_block.json', {
-  parent: 'block/cube',
+  parent: 'block/block',
   textures: {
-    up: 'minecraft:block/grass_block_top', north: 'minecraft:block/grass_block_side',
-    east: 'minecraft:block/grass_block_side', south: 'minecraft:block/grass_block_side',
-    west: 'minecraft:block/grass_block_side', down: 'minecraft:block/dirt', particle: 'minecraft:block/dirt',
+    particle: 'minecraft:block/dirt', bottom: 'minecraft:block/dirt',
+    top: 'minecraft:block/grass_block_top', side: 'minecraft:block/grass_block_side',
+    overlay: 'minecraft:block/grass_block_side',
   },
+  elements: [
+    {
+      from: [0, 0, 0],
+      to: [16, 16, 16],
+      faces: {
+        down: { uv: [0, 0, 16, 16], texture: '#bottom', cullface: 'down' },
+        up: { uv: [0, 0, 16, 16], texture: '#top', cullface: 'up', tintindex: 0 },
+        north: { uv: [0, 0, 16, 16], texture: '#side', cullface: 'north' },
+        south: { uv: [0, 0, 16, 16], texture: '#side', cullface: 'south' },
+        west: { uv: [0, 0, 16, 16], texture: '#side', cullface: 'west' },
+        east: { uv: [0, 0, 16, 16], texture: '#side', cullface: 'east' },
+      },
+    },
+    {
+      from: [0, 0, 0],
+      to: [16, 16, 16],
+      faces: {
+        north: { uv: [0, 0, 16, 16], texture: '#overlay', tintindex: 0 },
+        south: { uv: [0, 0, 16, 16], texture: '#overlay', tintindex: 0 },
+        west: { uv: [0, 0, 16, 16], texture: '#overlay', tintindex: 0 },
+        east: { uv: [0, 0, 16, 16], texture: '#overlay', tintindex: 0 },
+      },
+    },
+  ],
 });
 ecrire('assets/minecraft/textures/block/grass_block_top.png', png16(grain([116, 156, 74], 40, 11)));
 ecrire('assets/minecraft/textures/block/grass_block_side.png', png16((x, y) => (y < 4 ? grain([116, 156, 74], 40, 11)(x, y) : grain([134, 96, 67], 40, 5)(x, y))));
