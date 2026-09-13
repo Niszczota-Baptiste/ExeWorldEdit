@@ -1889,6 +1889,65 @@ est celle qu'on a laissée.
 
 ---
 
+## Les blocs Minefield, livrés avec l'application
+
+Les blocs `minefield:*` s'affichaient en carrés de couleur : aucun pack ne les
+connaît, et ce dépôt n'avait pas leur liste. Il fallait désigner le pack du
+serveur dans les réglages — ce qui suppose de l'avoir, et de savoir où.
+
+Or le site `titisite` publie déjà ces blocs, sous une forme **meilleure qu'un
+pack** : un codex **déjà aplati**. Plus de chaîne de `parent` à remonter, plus
+de variables de texture à résoudre d'un fichier à l'autre.
+
+```
+blockstates.json                 id de bloc → modèle (variants / multipart)
+render-models/block_<nom>.json   { textures: {clé: 'fichier.png'}, elements }
+render-textures/<fichier>.png    l'image
+```
+
+### Pourquoi on peut embarquer ceux-là, et pas les autres
+
+C'est toute la différence : les assets de Minecraft appartiennent à Mojang et
+leur redistribution exposerait celui qui diffuse l'installeur. Les blocs
+`minefield:*` appartiennent au serveur. On peut donc les mettre dans
+l'application — et c'est ce qui fait qu'une chaise s'affiche en chaise sans que
+personne ait rien à configurer.
+
+`npm run codex -- <titisite>` extrait le sous-ensemble : **1 678 blocs,
+4 585 modèles, 1 591 textures, 3,9 Mo compressés** sur les 69 Mo du codex
+complet. Le `.zip` est commité, comme `build/icon.ico` : régénérable par un
+script, jamais retouché à la main. Les blockstates sont réécrits sans les blocs
+vanilla, ce qui lève toute ambiguïté sur ce que l'archive couvre.
+
+### Le même contrat que le lecteur de pack
+
+`codexPack.js` rend exactement ce que rend `resourcePack.js` — `planModeleCodex`
+a la signature de sortie de `planModele`, `planIconeCodex` celle de `planIcone`.
+C'est ce qui permet à l'appelant d'essayer l'un puis l'autre **sans savoir
+lequel a répondu** :
+
+1. le pack de l'utilisateur d'abord. C'est SA version du bloc, et un pack de
+   serveur peut redéfinir un bloc que le codex connaît aussi ;
+2. le codex embarqué pour ce que le pack ignore.
+
+Le codex alimente aussi le catalogue : les 1 678 blocs du serveur sont dans
+l'onglet « Catalogue » de la palette au premier lancement.
+
+### Le piège des deux archives
+
+Le cache de lecture des textures était indexé sur le seul nom de fichier. Avec
+**deux** sources ouvertes, deux entrées homonymes se confondent et un bloc prend
+la texture de l'autre. La clé porte désormais la source.
+
+### Vérifié sans aucun pack configuré
+
+`resourcePacks: []` coupe toute lecture de l'installation. La vitrine des formes
+montre alors du marbre blanc, du marbre noir, des briques d'acier et leurs
+escaliers — texturés, avec leur géométrie — pendant que les blocs vanilla
+restent en gris uni. C'est exactement le partage voulu.
+
+---
+
 ## Écarts assumés avec le moteur du site
 
 | Sujet | Site | Ici | Pourquoi |

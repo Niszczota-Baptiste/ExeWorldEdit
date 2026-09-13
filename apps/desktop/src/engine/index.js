@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import fs from 'node:fs';
 import { FsAdapter, defaultRoot } from '@titi/we-engine/storage';
@@ -17,6 +18,7 @@ import { renderTextSvg } from '@titi/we-engine/worldedit';
 import { flatBlockColors } from '@titi/we-engine/colors';
 import { safeFileNameExt } from '@titi/we-engine/filename';
 import { planIcone, planModele, pickLatestVersion, orderPacks, pileComplete } from '@titi/we-engine/worldedit';
+import { ouvreCodex, planModeleCodex, planIconeCodex } from '@titi/we-engine/worldedit';
 import { zipIndex, zipRead } from '@titi/we-engine/worldedit';
 import { PANEL_PRESETS } from '@titi/we-engine/staging';
 
@@ -94,6 +96,29 @@ function ouvrePile(chemins) {
   };
   packCache = { cle, pack };
   return pack;
+}
+
+/**
+ * Le CODEX `minefield:*` embarqué avec l'application.
+ *
+ * Les assets de Minecraft ne peuvent pas être livrés (EULA) : ceux-là sont lus
+ * dans l'installation de l'utilisateur. Les blocs `minefield:*`, eux,
+ * appartiennent au serveur — ils sont donc dans l'archive, et une chaise
+ * s'affiche en chaise sans que personne ait rien à configurer.
+ *
+ * Ouvert une fois, à la demande. `null` si l'archive manque : l'application
+ * fonctionne sans, avec des carrés de couleur pour les blocs du serveur.
+ */
+let codexCache;
+function codexMinefield() {
+  if (codexCache !== undefined) return codexCache;
+  codexCache = null;
+  try {
+    const ici = path.dirname(fileURLToPath(import.meta.url));
+    const chemin = path.join(ici, '..', '..', 'assets', 'codex-minefield.zip');
+    if (fs.existsSync(chemin)) codexCache = ouvreCodex(fs.readFileSync(chemin));
+  } catch { codexCache = null; } // archive absente ou abîmée : on continue sans
+  return codexCache;
 }
 
 /** Les chemins configurés, ou ceux détectés si rien n'est configuré. */
@@ -675,6 +700,17 @@ const methods = {
         }
       } catch { /* pack illisible : le catalogue se contente du reste */ }
     }
+
+    // Le codex embarqué complète : les blocs du serveur sont là même si
+    // l'utilisateur n'a désigné aucun pack.
+    const codex = codexMinefield();
+    if (codex) {
+      for (const id of codex.ids()) {
+        if (connus.has(id)) continue;
+        connus.add(id);
+        blocks.push({ id, group: 'minefield', fromPack: true });
+      }
+    }
     return { groups: GROUPS, blocks };
   },
 
@@ -733,22 +769,29 @@ const methods = {
    * icône fausse est pire qu'un carré de couleur, parce qu'on la croit.
    */
   blockIcons: ({ ids }) => {
+    const codex = codexMinefield();
     const chemins = cheminsPack();
-    if (!chemins.length) return {};
     let pack;
-    try { pack = ouvrePile(chemins); } catch { return {}; }
+    try { pack = chemins.length ? ouvrePile(chemins) : null; } catch { pack = null; }
+    if (!pack && !codex) return {};
 
     const out = {};
     for (const id of (Array.isArray(ids) ? ids : []).slice(0, 256)) {
-      let plan;
-      try { plan = planIcone(pack, id); } catch { plan = null; }
+      // Le pack de l'utilisateur d'abord ; le codex embarqué pour ce qu'il
+      // ignore — en pratique les `minefield:*`.
+      let plan = null;
+      let source = pack;
+      if (pack) { try { plan = planIcone(pack, id); } catch { plan = null; } }
+      if (!plan && codex) {
+        try { plan = planIconeCodex(codex, id); source = codex; } catch { plan = null; }
+      }
       if (!plan) { out[id] = null; continue; }
       // Les PNG partent en `data:` : une texture de bloc fait 16 × 16, donc
       // quelques centaines d'octets, et le renderer n'a qu'à les donner à une
       // `Image`. Pas de fichier temporaire, pas de second protocole.
       const textures = {};
       for (const [cle, fichier] of Object.entries(plan.textures)) {
-        const buf = pack.read(fichier);
+        const buf = source === codex ? codex.lire(fichier) : source.read(fichier);
         if (buf) textures[cle] = `data:image/png;base64,${buf.toString('base64')}`;
       }
       out[id] = Object.keys(textures).length ? { kind: plan.kind, elements: plan.elements, textures } : null;
@@ -765,34 +808,46 @@ const methods = {
    * en cube plein fait passer une volée de marches pour un mur.
    */
   blockShapes: ({ ids }) => {
+    const codex = codexMinefield();
     const chemins = cheminsPack();
-    if (!chemins.length) return {};
     let pack;
-    try { pack = ouvrePile(chemins); } catch { return {}; }
+    try { pack = chemins.length ? ouvrePile(chemins) : null; } catch { pack = null; }
+    // Sans pack NI codex, il n'y a rien à dire : le viewport garde ses couleurs.
+    if (!pack && !codex) return {};
 
     const out = {};
     // Le cache de fichiers est PARTAGÉ par tous les blocs du lot : `stone.png`
     // sert des dizaines de blocs, et un build ordinaire le redemanderait deux
-    // cents fois.
+    // cents fois. La clé porte la SOURCE : deux archives peuvent avoir une
+    // entrée du même nom, et les confondre donnerait la texture de l'autre.
     const cache = new Map();
-    const lire = (fichier) => {
-      if (cache.has(fichier)) return cache.get(fichier);
-      const buf = pack.read(fichier);
+    const lire = (source, fichier) => {
+      const cle = `${source === codex ? 'c' : 'p'}${fichier}`;
+      if (cache.has(cle)) return cache.get(cle);
+      const buf = source === codex ? codex.lire(fichier) : source?.read(fichier);
       const url = buf ? `data:image/png;base64,${buf.toString('base64')}` : null;
-      cache.set(fichier, url);
+      cache.set(cle, url);
       return url;
     };
 
     for (const id of (Array.isArray(ids) ? ids : []).slice(0, 2048)) {
+      // Le pack de l'utilisateur d'abord : c'est SA version du bloc, et un pack
+      // de serveur peut redéfinir un bloc que le codex embarqué connaît aussi.
+      // Le codex ne sert donc qu'à ce que le pack ignore — en pratique les
+      // `minefield:*`, quand aucun pack de serveur n'est configuré.
       let modele;
-      try { modele = planModele(pack, id); } catch { modele = null; }
+      let source = pack;
+      try { modele = pack ? planModele(pack, id) : null; } catch { modele = null; }
+      if (!modele && codex) {
+        try { modele = planModeleCodex(codex, id); source = codex; } catch { modele = null; }
+      }
       if (!modele) continue;
 
       const boxes = [];
       for (const box of modele.boxes) {
         const faces = {};
         for (const [face, decl] of Object.entries(box.faces)) {
-          const url = lire(decl.texture);
+          const url = lire(source, decl.texture);
           if (url) faces[face] = { texture: url, uv: decl.uv, rotation: decl.rotation, tint: decl.tint };
         }
         if (Object.keys(faces).length) boxes.push({ from: box.from, to: box.to, faces });

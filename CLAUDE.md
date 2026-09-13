@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (462 tests aujourd'hui : 337 moteur, 125 desktop)
+npm test          # tous les paquets (473 tests aujourd'hui : 348 moteur, 125 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -76,6 +76,7 @@ npm run start --workspace @titi/desktop   # build puis lancement
 npm run dist  --workspace @titi/desktop   # installeur Windows
 npm run demo  --workspace @titi/desktop -- <dossier>   # build de démonstration
 npm run pack  --workspace @titi/desktop -- <dossier>   # pack de ressources de démonstration
+npm run codex --workspace @titi/desktop -- <titisite>  # réextrait assets/codex-minefield.zip
 npm run icon  --workspace @titi/desktop   # régénère build/icon.ico
 
 npm run bench --workspace @titi/we-engine                 # médiane de 1
@@ -112,7 +113,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Une conversion pixels → grille | `apps/desktop/src/renderer/grid/pixels.js` (pur, testé sans navigateur) ; ce qui touche un canvas va dans `draw.js` |
 | Un outil dans l'interface | `TOOLS` et `TOOL_OPS` (`apps/desktop/src/renderer/store.js`) — l'inspecteur génère ses champs depuis le descripteur du moteur, il n'y a pas de formulaire à écrire. Un outil SANS opérations doit avoir sa note dans `TOOL_NOTES`, sinon l'inspecteur reste muet |
 | Un TYPE de paramètre d'opération | son champ dans `Field` (`Inspector.jsx`) ET son cas dans le constructeur de `params` juste au-dessus — un test exige les deux |
-| Un bloc au catalogue | `VANILLA` (`src/worldedit/blockCatalog.js`) pour du vanilla. Pour un `minefield:*` : désigner le PACK du serveur dans les réglages — il déclare ses blocs et ses modèles, donc le catalogue et les icônes se remplissent seuls. `blocks.json` reste pour ce qui n'est dans aucun pack |
+| Un bloc au catalogue | `VANILLA` (`src/worldedit/blockCatalog.js`) pour du vanilla. Les `minefield:*` viennent du CODEX embarqué (`assets/codex-minefield.zip`), réextrait du site par `npm run codex` — rien à configurer. Un pack désigné dans les réglages les recouvre. `blocks.json` reste pour ce qui n'est ni dans l'un ni dans l'autre |
 | Un raccourci clavier | `ACTIONS` (`apps/desktop/src/renderer/keys.js`) — les touches d'outil en sont DÉRIVÉES de `TOOLS`, rien à recopier |
 | Un nom qui devient un nom de FICHIER | `safeFileName` (`src/storage/filename.js`) — jamais une expression jetable sur place, et jamais `\w` |
 | Un code d'erreur | `ERREURS` (`apps/desktop/src/renderer/store.js`), en français et en disant QUOI FAIRE — un test relit les `new Error()` des deux moteurs et refuse un code sans phrase |
@@ -129,9 +130,10 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 
 Entités mobiles (`entities/*.mca`), aperçu découpé par chunk, `getBlock` sans
 allocation, l'application locale du pinceau (aujourd'hui le trait part au moteur
-au relâchement), et la liste réelle des blocs `minefield:*` — elle appartient au serveur, pas à ce dépôt, et se
-déclare dans `blocks.json`. Détail, écarts assumés avec le site et ordre
-des phases : **`docs/desktop.md`**.
+au relâchement), la sélection à la souris dans le
+viewport, et le remaillage LOCAL après un trait de pinceau (aujourd'hui tout le
+build est remaillé). Détail, écarts assumés avec le site et ordre des phases :
+**`docs/desktop.md`**.
 
 ## Rapport au site `titisite`
 
@@ -485,6 +487,10 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   cuboïde : les deux défauts ci-dessus passaient inaperçus chez nous et
   sortaient chez l'utilisateur. Un pack de démonstration doit reproduire le cas
   DIFFICILE, pas le contourner.
+- **Deux archives peuvent avoir une entrée du MÊME nom.** Le pack de
+  l'utilisateur et le codex embarqué sont lus tous les deux ; un cache de
+  lecture indexé sur le seul nom de fichier rendrait la texture de l'autre. La
+  clé porte la source.
 - **Le verrou `session.lock` n'est détectable que sur Windows.** Ailleurs il est
   consultatif et une ouverture réussie ne prouve rien. `probeWorldLock` renvoie
   `{ locked, reliable }` : ne jamais réduire ça à un booléen, ce serait

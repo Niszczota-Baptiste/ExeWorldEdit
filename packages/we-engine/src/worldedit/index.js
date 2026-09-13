@@ -12,4 +12,5 @@ export * from './operations.js';
 export * from './jobs.js';
 export * from './resourcePack.js';
 export * from './packDetect.js';
+export * from './codexPack.js';
 export { zipIndex, zipRead } from './zipReader.js';

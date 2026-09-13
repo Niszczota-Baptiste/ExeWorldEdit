@@ -191,6 +191,13 @@ staging.seedRegions(worldId, readRegions(info, [{ regionX: 0, regionZ: 0 }, { re
 // comparaison le dit tout de suite. Les modèles viennent du pack de
 // démonstration (`npm run pack`), donc aucune texture du jeu n'est requise.
 
+// Quelques blocs réels du serveur, pour montrer que le codex embarqué suffit.
+const MINEFIELD = [
+  'minefield:white_marble', 'minefield:black_marble', 'minefield:steel_large_bricks',
+  'minefield:cyan_terracotta_bricks', 'minefield:white_marble_stairs',
+  'minefield:cyan_terracotta_stairs', 'minefield:chiseled_stone_bricks',
+];
+
 const vitrineId = 'demo-formes';
 adapter.removeProject(vitrineId);
 {
@@ -221,6 +228,9 @@ adapter.removeProject(vitrineId);
     poser(x, Y0 + 1, 5, 'minecraft:stone_slab');
     poser(x, Y0 + 1, 8, 'minefield:quart_de_bloc');
     if (x % 3 === 2) poser(x, Y0 + 1, 12, 'minefield:chaise');
+    // Des blocs du VRAI serveur, tirés du codex embarqué : ceux-là s'affichent
+    // sans qu'aucun pack soit configuré, contrairement aux blocs vanilla.
+    poser(x, Y0 + 2, 2, MINEFIELD[(x - 2) % MINEFIELD.length]);
   }
   for (let m = 0; m < 5; m++) {
     for (let z = 3; z <= 4; z++) poser(4 + m * 3, Y0 + 1 + m, z, 'minecraft:stone_slab');
