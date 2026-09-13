@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (487 tests aujourd'hui : 348 moteur, 139 desktop)
+npm test          # tous les paquets (493 tests aujourd'hui : 348 moteur, 145 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -97,7 +97,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 
 | Ajouter… | …dans |
 |---|---|
-| Une opération WorldEdit | `packages/we-engine/src/worldedit/transform.js` + son entrée dans `OPS` (`src/staging/staging.js`) + son descripteur dans `operations.js` + ses tests. Elle DOIT rendre des `bounds` couvrant tout ce qu'elle écrit : l'instantané d'annulation ET l'aperçu incrémental s'y fient. Ne l'ajouter à `COLUMN_LOCAL_OPS` que si elle ne lit JAMAIS hors de son (x, z) |
+| Une opération WorldEdit | son nom WorldEdit dans `we` (descripteur) pour qu'on la trouve à « //walls » dans la palette, puis `packages/we-engine/src/worldedit/transform.js` + son entrée dans `OPS` (`src/staging/staging.js`) + son descripteur dans `operations.js` + ses tests. Elle DOIT rendre des `bounds` couvrant tout ce qu'elle écrit : l'instantané d'annulation ET l'aperçu incrémental s'y fient. Ne l'ajouter à `COLUMN_LOCAL_OPS` que si elle ne lit JAMAIS hors de son (x, z) |
 | Une propriété d'état de bloc à transformer | `src/worldedit/blockstates.js` + une assertion par propriété dans `test/worldedit.test.js` |
 | Un format d'échange | `src/worldedit/schematicFormats.js` + un test de round-trip |
 | Une donnée hors grille de blocs (block entity, biome) | elle voyage dans la `Schematic` (`transform.js`) pour les transformations, et se recopie explicitement dans l'export décalé (`exportBuild`) |

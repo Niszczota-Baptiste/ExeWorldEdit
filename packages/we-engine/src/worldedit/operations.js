@@ -1,5 +1,11 @@
 // Descripteur des opérations WorldEdit — sert GET /operations (génération de
 // l'UI et de la doc côté client) et borne la validation côté serveur.
+//
+// `we` porte les commandes WorldEdit correspondantes. Ce n'est pas de la
+// décoration : quelqu'un qui connaît WorldEdit cherche « //walls », pas
+// « Murs ». La palette de commandes les indexe, ce qui rend l'application
+// utilisable sans apprendre un second vocabulaire. Une opération sans
+// équivalent WorldEdit n'a simplement pas de `we`.
 // Toutes les opérations d'écriture exigent le rôle « editor » (owner inclus) ;
 // la sélection et l'aperçu sont accessibles au « viewer ».
 
@@ -22,12 +28,12 @@ const BIOMES = [
 
 export const OPERATIONS = [
   {
-    id: 'mirror', label: 'Miroir', minRole: 'editor', group: 'Transformer',
+    id: 'mirror', we: ['//flip'], label: 'Miroir', minRole: 'editor', group: 'Transformer',
     description: 'Réfléchit la sélection EN PLACE (états retournés : escaliers, portes, panneaux…).',
     params: [{ name: 'axis', type: 'enum', values: ['x', 'y', 'z'], default: 'x', label: 'Axe' }],
   },
   {
-    id: 'mirrorcopy', label: 'Miroir (copie)', minRole: 'editor', group: 'Transformer',
+    id: 'mirrorcopy', we: ['//flip'], label: 'Miroir (copie)', minRole: 'editor', group: 'Transformer',
     description: 'Duplique la sélection en miroir de l’AUTRE côté (l’original reste). Ex. copier une aile à droite. La copie est posée juste à côté (écart réglable) ; les états sont retournés.',
     params: [
       { name: 'axis', type: 'enum', values: ['x', 'y', 'z'], labels: { x: 'X (Est ⇄ Ouest)', y: 'Y (haut ⇄ bas)', z: 'Z (Nord ⇄ Sud)' }, default: 'x', label: 'Axe miroir' },
@@ -37,12 +43,12 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'rotate', label: 'Rotation', minRole: 'editor', group: 'Transformer',
+    id: 'rotate', we: ['//rotate'], label: 'Rotation', minRole: 'editor', group: 'Transformer',
     description: 'Tourne la sélection autour de Y (et ses états).',
     params: [{ name: 'degrees', type: 'enum', values: [90, 180, 270], default: 90, label: 'Angle' }],
   },
   {
-    id: 'translate', label: 'Translation', minRole: 'editor', group: 'Transformer',
+    id: 'translate', we: ['//move'], label: 'Translation', minRole: 'editor', group: 'Transformer',
     description: 'Déplace la sélection ; l’origine est vidée.',
     params: [
       { name: 'dx', type: 'int', default: 0, label: 'ΔX (Est)' },
@@ -51,7 +57,7 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'stack', label: 'Répéter (stack)', minRole: 'editor', group: 'Transformer',
+    id: 'stack', we: ['//stack'], label: 'Répéter (stack)', minRole: 'editor', group: 'Transformer',
     description: 'Répète la sélection plusieurs fois dans une direction.',
     params: [
       { name: 'count', type: 'int', default: 1, label: 'Nombre' },
@@ -67,7 +73,7 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'replace', label: 'Remplacer', minRole: 'editor', group: 'Blocs',
+    id: 'replace', we: ['//replace', '//replacenear'], label: 'Remplacer', minRole: 'editor', group: 'Blocs',
     description: 'Remplace un ou plusieurs blocs source par une cible.',
     params: [
       { name: 'from', type: 'blocklist', label: 'Bloc(s) source' },
@@ -75,7 +81,7 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'set', label: 'Remplir', minRole: 'editor', group: 'Blocs',
+    id: 'set', we: ['//set'], label: 'Remplir', minRole: 'editor', group: 'Blocs',
     description: 'Remplit la sélection d’un bloc (masque optionnel : surface, air…).',
     params: [
       { name: 'block', type: 'block', label: 'Bloc' },
@@ -83,7 +89,7 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'mix', label: 'Mélange (%)', minRole: 'editor', group: 'Blocs',
+    id: 'mix', we: ['//set'], label: 'Mélange (%)', minRole: 'editor', group: 'Blocs',
     description: 'Remplit/remplace par un mélange aléatoire pondéré (ex. 30% terre, 20% andésite…). Laisse « bloc source » vide pour toute la sélection.',
     params: [
       { name: 'from', type: 'block', label: 'Bloc source (vide = tous)' },
@@ -93,27 +99,27 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'walls', label: 'Murs', minRole: 'editor', group: 'Blocs',
+    id: 'walls', we: ['//walls'], label: 'Murs', minRole: 'editor', group: 'Blocs',
     description: 'Pose un bloc sur les 4 côtés verticaux de la sélection.',
     params: [{ name: 'block', type: 'block', label: 'Bloc' }],
   },
   {
-    id: 'faces', label: 'Faces (boîte)', minRole: 'editor', group: 'Blocs',
+    id: 'faces', we: ['//faces', '//outline'], label: 'Faces (boîte)', minRole: 'editor', group: 'Blocs',
     description: 'Pose un bloc sur les 6 faces (murs + sol + plafond).',
     params: [{ name: 'block', type: 'block', label: 'Bloc' }],
   },
   {
-    id: 'hollow', label: 'Creuser', minRole: 'editor', group: 'Blocs',
+    id: 'hollow', we: ['//hollow'], label: 'Creuser', minRole: 'editor', group: 'Blocs',
     description: 'Vide l’intérieur plein de la sélection (garde une coque de 1).',
     params: [],
   },
   {
-    id: 'overlay', label: 'Recouvrir', minRole: 'editor', group: 'Blocs',
+    id: 'overlay', we: ['//overlay'], label: 'Recouvrir', minRole: 'editor', group: 'Blocs',
     description: 'Pose un bloc juste au-dessus de la surface de chaque colonne.',
     params: [{ name: 'block', type: 'block', label: 'Bloc' }],
   },
   {
-    id: 'naturalize', label: 'Naturaliser', minRole: 'editor', group: 'Blocs',
+    id: 'naturalize', we: ['//naturalize'], label: 'Naturaliser', minRole: 'editor', group: 'Blocs',
     description: 'Recouvre chaque surface d’une palette naturelle (surface / sous-sol / roche profonde mélangée). « Auto » suit le biome de chaque colonne ; « Personnalisé » utilise tes blocs.',
     params: [
       {
@@ -134,17 +140,17 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'drain', label: 'Drainer (eau/lave)', minRole: 'editor', group: 'Blocs',
+    id: 'drain', we: ['//drain'], label: 'Drainer (eau/lave)', minRole: 'editor', group: 'Blocs',
     description: 'Vide l’eau et la lave de la sélection (retire aussi le waterlogged).',
     params: [],
   },
   {
-    id: 'cut', label: 'Couper (→ air)', minRole: 'editor', group: 'Blocs',
+    id: 'cut', we: ['//cut'], label: 'Couper (→ air)', minRole: 'editor', group: 'Blocs',
     description: 'Vide la sélection (tous les blocs → air) et la copie dans le presse-papier.',
     params: [],
   },
   {
-    id: 'sphere', label: 'Sphère', minRole: 'editor', group: 'Formes',
+    id: 'sphere', we: ['//sphere', '//hsphere'], label: 'Sphère', minRole: 'editor', group: 'Formes',
     description: 'Remplit une boule centrée sur la sélection (pinceau). Creux = coque.',
     params: [
       { name: 'block', type: 'block', label: 'Bloc' },
@@ -153,7 +159,7 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'cyl', label: 'Cylindre', minRole: 'editor', group: 'Formes',
+    id: 'cyl', we: ['//cyl', '//hcyl'], label: 'Cylindre', minRole: 'editor', group: 'Formes',
     description: 'Remplit un cylindre vertical centré sur la sélection (pinceau).',
     params: [
       { name: 'block', type: 'block', label: 'Bloc' },
@@ -162,7 +168,7 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'pyramid', label: 'Pyramide', minRole: 'editor', group: 'Formes',
+    id: 'pyramid', we: ['//pyramid', '//hpyramid'], label: 'Pyramide', minRole: 'editor', group: 'Formes',
     description: 'Pyramide à base carrée inscrite dans la sélection.',
     params: [
       { name: 'block', type: 'block', label: 'Bloc' },
@@ -170,7 +176,7 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'cone', label: 'Cône', minRole: 'editor', group: 'Formes',
+    id: 'cone', we: ['//cone'], label: 'Cône', minRole: 'editor', group: 'Formes',
     description: 'Cône à base ronde, rayon décroissant avec la hauteur.',
     params: [
       { name: 'block', type: 'block', label: 'Bloc' },
@@ -178,12 +184,12 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'line', label: 'Ligne', minRole: 'editor', group: 'Formes',
+    id: 'line', we: ['//line'], label: 'Ligne', minRole: 'editor', group: 'Formes',
     description: 'Trace une ligne droite entre le coin A et le coin B.',
     params: [{ name: 'block', type: 'block', label: 'Bloc' }],
   },
   {
-    id: 'path', label: 'Tracé / route', minRole: 'editor', group: 'Formes',
+    id: 'path', we: ['//curve'], label: 'Tracé / route', minRole: 'editor', group: 'Formes',
     description: 'Chemin entre le coin A et le coin B (route, pont, rail, rambarde). Largeur + courbure réglables ; courbe = Bézier.',
     params: [
       {
@@ -202,7 +208,7 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'smooth', label: 'Lisser (terrain)', minRole: 'editor', group: 'Formes',
+    id: 'smooth', we: ['//smooth'], label: 'Lisser (terrain)', minRole: 'editor', group: 'Formes',
     description: 'Adoucit la hauteur de la surface (type GoBrush).',
     params: [{ name: 'iterations', type: 'int', default: 2, label: 'Passes' }],
   },
@@ -223,7 +229,7 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'biome', label: 'Peindre biome', minRole: 'editor', group: 'Minecraft',
+    id: 'biome', we: ['//setbiome'], label: 'Peindre biome', minRole: 'editor', group: 'Minecraft',
     description: 'Change le biome de la sélection (cellules de 4×4×4). N’affecte que les sections déjà présentes du build.',
     params: [{ name: 'biome', type: 'biome', values: BIOMES, default: 'minecraft:plains', label: 'Biome' }],
   },
@@ -257,12 +263,12 @@ export const OPERATIONS = [
     ],
   },
   {
-    id: 'copy', label: 'Copier', minRole: 'editor', group: 'Presse-papier',
+    id: 'copy', we: ['//copy'], label: 'Copier', minRole: 'editor', group: 'Presse-papier',
     description: 'Copie la sélection dans le presse-papier serveur (lié à la session).',
     params: [],
   },
   {
-    id: 'paste', label: 'Coller', minRole: 'editor', group: 'Presse-papier',
+    id: 'paste', we: ['//paste'], label: 'Coller', minRole: 'editor', group: 'Presse-papier',
     description: 'Colle le presse-papier au coin min de la sélection.',
     params: [{ name: 'mode', type: 'enum', values: ['overlay', 'overwrite'], default: 'overlay', label: 'Mode' }],
   },

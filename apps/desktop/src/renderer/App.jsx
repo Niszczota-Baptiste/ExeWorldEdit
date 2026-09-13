@@ -9,6 +9,7 @@ import StatusBar from './shell/StatusBar.jsx';
 import ToolWheel from './shell/ToolWheel.jsx';
 import WorldPicker from './shell/WorldPicker.jsx';
 import Settings from './shell/Settings.jsx';
+import CommandPalette from './shell/CommandPalette.jsx';
 import PerfPanel from './shell/PerfPanel.jsx';
 import AuditPanel from './shell/AuditPanel.jsx';
 import Dock, { DropZone, PANEL_DRAG_TYPE } from './shell/Dock.jsx';
@@ -296,6 +297,7 @@ export default function App() {
       <StatusBar />
       <WorldPicker />
       <Settings />
+      <CommandPalette />
     </div>
   );
 }

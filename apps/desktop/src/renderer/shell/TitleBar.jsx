@@ -106,7 +106,11 @@ export default function TitleBar() {
         ))}
       </div>
 
-      <button className="search" title="Palette de commandes">
+      <button
+        className="search"
+        title="Palette de commandes — cherche aussi par nom WorldEdit (//walls)"
+        onClick={() => window.dispatchEvent(new Event('titi:palette'))}
+      >
         <Search size={12} />
         <span>Rechercher une action</span>
         <kbd>Ctrl K</kbd>
