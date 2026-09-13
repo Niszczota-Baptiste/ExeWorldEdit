@@ -9,7 +9,7 @@
     "email": "baptisteniszczota@gmail.com"
   },
   "scripts": {
-    "dev": "concurrently -k -n vite,electron -c cyan,magenta \"vite\" \"wait-on tcp:5180 && cross-env TITI_DEV_SERVER=http://localhost:5180 electron .\"",
+    "dev": "node scripts/dev.js",
     "build": "vite build",
     "start": "npm run build && electron .",
     "demo": "node scripts/make-demo.js",

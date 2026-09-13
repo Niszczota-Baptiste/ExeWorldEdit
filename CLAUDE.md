@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (445 tests aujourd'hui : 336 moteur, 109 desktop)
+npm test          # tous les paquets (448 tests aujourd'hui : 336 moteur, 112 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -122,6 +122,7 @@ c'est du SwiftShader ; le nombre d'appels de dessin, lui, est transposable.
 | Une icône dans l'interface | `apps/desktop/src/renderer/shell/icons.js` — le SEUL fichier du renderer qui importe `lucide-react` |
 | L'icône de l'application (exe, installeur) | `apps/desktop/scripts/make-icon.js`, puis `npm run icon --workspace @titi/desktop` — le binaire est régénérable, jamais retouché à la main |
 | Un format d'entrée | `openAnyPath` (`apps/desktop/src/main/index.js`) décide selon l'extension ; dialogue, glisser-déposer et chemin de lancement y passent tous |
+| Un script npm | il ne peut appeler QUE `node`, `npm`, ou un binaire réellement installé — un test relit les scripts des trois paquets et refuse le reste. Ce qui a besoin d'un outil de lancement s'écrit en Node (`apps/desktop/scripts/dev.js`), jamais en syntaxe de shell |
 
 ## Ce qui n'est pas encore là
 
@@ -451,6 +452,15 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   d'une face demande qu'on les DÉDUISE des bornes du cuboïde : c'est ce qui fait
   qu'une dalle montre la moitié basse de sa texture au lieu de la texture
   entière écrasée. Confondre les deux étire un point de texture sur la face.
+- **Un script npm qui appelle un paquet non déclaré ne se signale QU'À L'USAGE.**
+  `npm run dev` enchaînait `concurrently`, `wait-on` et `cross-env` : aucun des
+  trois n'était dans les dépendances. `npm install` réussissait sans une erreur,
+  puis la commande citée en tête de la documentation échouait sur « 'concurrently'
+  n'est pas reconnu ». Un test relit désormais les scripts des trois paquets.
+  Corollaire : le lanceur de développement est un script Node (`scripts/dev.js`)
+  — Node sait attendre un port, poser une variable d'environnement dans `spawn`
+  et arrêter l'autre processus quand l'un s'arrête, sans un seul paquet ni une
+  seule règle de citation de cmd.
 - **Le verrou `session.lock` n'est détectable que sur Windows.** Ailleurs il est
   consultatif et une ouverture réussie ne prouve rien. `probeWorldLock` renvoie
   `{ locked, reliable }` : ne jamais réduire ça à un booléen, ce serait
