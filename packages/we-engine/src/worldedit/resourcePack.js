@@ -129,15 +129,50 @@ const estPlein = (e) => {
     && a.every((v) => v === 0) && b.every((v) => v === 16);
 };
 
+const SIX_FACES = ['down', 'up', 'north', 'south', 'west', 'east'];
+
+/**
+ * L'indice du cuboïde qui REMPLIT le bloc, ou −1.
+ *
+ * « Un seul cuboïde de 0 à 16 » était trop strict, et le prix a été lourd :
+ * `grass_block` en déclare DEUX — le cube, puis la couche d'herbe teintée sur
+ * les côtés — et se retrouvait classé « modèle ». Un bloc-modèle n'est pas
+ * opaque (il ne bouche pas sa case), donc l'herbe ne cachait plus rien : sur un
+ * terrain, chaque bloc SOUS la surface redevenait visible et le mailleur
+ * émettait tout l'intérieur. Mesuré sur un build réel : 3 957 chunks, 1 281
+ * appels de dessin, dix secondes de maillage, et un sol qui ne ressemblait à
+ * rien.
+ *
+ * Le bon critère n'est pas le NOMBRE de cuboïdes mais la présence d'un cuboïde
+ * qui remplit le bloc avec ses six faces. Les autres sont des décorations
+ * posées dessus (herbe, rayures d'une ruche, contour d'un bloc de miel) :
+ * invisibles derrière le cube, donc rien à perdre à les laisser de côté — et
+ * tout à gagner, puisque le bloc redevient opaque.
+ */
+export function indiceCubePlein(elements) {
+  if (!Array.isArray(elements)) return -1;
+  let choix = -1;
+  let mieux = -1;
+  for (let i = 0; i < elements.length; i++) {
+    if (!estPlein(elements[i])) continue;
+    // À égalité de forme, celui qui déclare le PLUS de faces : `grass_block` a
+    // deux cuboïdes pleins, le vrai cube (six faces) puis la couche d'herbe
+    // (quatre côtés). Prendre le premier venu marcherait ici par chance ; le
+    // compte des faces le rend vrai dans tous les cas.
+    const n = SIX_FACES.filter((f) => elements[i]?.faces?.[f]).length;
+    if (n > mieux) { mieux = n; choix = i; }
+  }
+  return choix;
+}
+
 /**
  * Le modèle est-il un CUBE PLEIN ?
  *
  * La question compte : un bloc qui n'en est pas un — une chaise, un escalier,
  * une dalle, un quart de bloc `minefield:*` — dessiné en cube plein donne une
- * icône qui ment sur ce qu'on pose. Un seul cuboïde de 0 à 16 en est un ; tout
- * le reste se dessine par ses cuboïdes.
+ * icône qui ment sur ce qu'on pose.
  */
-export const estCubePlein = (elements) => Array.isArray(elements) && elements.length === 1 && estPlein(elements[0]);
+export const estCubePlein = (elements) => indiceCubePlein(elements) >= 0;
 
 /** Les six faces d'un cube, dans l'ordre du mailleur : −X +X +Y −Y −Z +Z. */
 export const FACES_CUBE = ['west', 'east', 'up', 'down', 'north', 'south'];
@@ -255,8 +290,14 @@ export function planModele(pack, id) {
     if (defaut) break;
   }
 
+  // Un cube plein ne garde que SON cuboïde : les décorations posées dessus
+  // (l'herbe de `grass_block`) sont invisibles derrière lui, et les émettre
+  // coûterait des quads pour rien sur chaque bloc de surface d'un terrain.
+  const plein = indiceCubePlein(geo);
+  const utiles = plein >= 0 ? [geo[plein]] : geo;
+
   const boxes = [];
-  for (const e of geo) {
+  for (const e of utiles) {
     if (!Array.isArray(e.from) || !Array.isArray(e.to)) continue;
     const faces = {};
     for (const f of FACES_CUBE) {
@@ -282,5 +323,5 @@ export function planModele(pack, id) {
     if (Object.keys(faces).length) boxes.push({ from: e.from.map(Number), to: e.to.map(Number), faces });
   }
   if (!boxes.length) return null;
-  return { kind: estCubePlein(geo) ? 'cube' : 'model', boxes };
+  return { kind: plein >= 0 ? 'cube' : 'model', boxes };
 }

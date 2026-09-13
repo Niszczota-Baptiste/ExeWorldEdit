@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  modeleDuBloc, aplatitModele, resoutTexture, estCubePlein, planIcone, planFaces, planModele,
+  modeleDuBloc, aplatitModele, resoutTexture, estCubePlein, indiceCubePlein, planIcone, planFaces, planModele,
   FACES_VUES, FACES_CUBE,
 } from '../src/worldedit/resourcePack.js';
 
@@ -96,9 +96,30 @@ test('une variable de texture se résout, même en chaîne', () => {
 test('un cube plein est reconnu, et rien d’autre', () => {
   assert.equal(estCubePlein([{ from: [0, 0, 0], to: [16, 16, 16] }]), true);
   assert.equal(estCubePlein([{ from: [0, 0, 0], to: [16, 8, 16] }]), false, 'une dalle n’est pas un cube');
-  assert.equal(estCubePlein([{ from: [0, 0, 0], to: [16, 16, 16] }, { from: [0, 0, 0], to: [2, 2, 2] }]), false);
   assert.equal(estCubePlein([]), false);
   assert.equal(estCubePlein(null), false);
+
+  // Cette ligne exigeait `false` — et c'était la RÈGLE FAUSSE. Un cuboïde qui
+  // remplit le bloc reste un cube même si le modèle en pose d'autres par-
+  // dessus : c'est la forme exacte de `grass_block`, et la traiter en modèle
+  // lui retirait son opacité.
+  assert.equal(
+    estCubePlein([{ from: [0, 0, 0], to: [16, 16, 16] }, { from: [0, 0, 0], to: [2, 2, 2] }]),
+    true,
+    'une décoration posée sur un cube ne lui retire pas sa forme',
+  );
+});
+
+test('parmi plusieurs cuboïdes pleins, on garde celui qui a le plus de faces', () => {
+  // La forme RÉELLE de `grass_block` : le cube, puis la couche d'herbe teintée
+  // sur les quatre côtés. Choisir la seconde donnerait un bloc sans dessus ni
+  // dessous.
+  const herbe = [
+    { from: [0, 0, 0], to: [16, 16, 16], faces: Object.fromEntries(FACES_CUBE.map((f) => [f, { texture: '#a' }])) },
+    { from: [0, 0, 0], to: [16, 16, 16], faces: { north: { texture: '#o' }, south: { texture: '#o' }, west: { texture: '#o' }, east: { texture: '#o' } } },
+  ];
+  assert.equal(indiceCubePlein(herbe), 0);
+  assert.equal(indiceCubePlein([herbe[1], herbe[0]]), 1, 'l’ordre ne décide pas — le compte des faces si');
 });
 
 test('plan d’un bloc plein : un cube, et ses textures par face', () => {

@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (448 tests aujourd'hui : 336 moteur, 112 desktop)
+npm test          # tous les paquets (449 tests aujourd'hui : 337 moteur, 112 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -461,6 +461,15 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
   — Node sait attendre un port, poser une variable d'environnement dans `spawn`
   et arrêter l'autre processus quand l'un s'arrête, sans un seul paquet ni une
   seule règle de citation de cmd.
+- **« Un cuboïde » n'est pas le bon critère pour « c'est un cube ».**
+  `grass_block` en déclare DEUX — le cube, puis la couche d'herbe teintée sur
+  les côtés — et se retrouvait classé « modèle ». Un bloc-modèle n'est pas
+  opaque : l'herbe ne cachait donc plus rien, et sur un terrain chaque bloc SOUS
+  la surface redevenait visible. Mesuré sur un build réel : 3 957 chunks, 1 281
+  appels de dessin, dix secondes de maillage, et un sol méconnaissable. Le
+  critère est la présence d'un cuboïde qui REMPLIT le bloc (`indiceCubePlein`) —
+  à égalité, celui qui déclare le plus de faces. Quatre blocs vanilla sont
+  concernés, mais l'un d'eux est la surface de tout terrain.
 - **Le verrou `session.lock` n'est détectable que sur Windows.** Ailleurs il est
   consultatif et une ouverture réussie ne prouve rien. `probeWorldLock` renvoie
   `{ locked, reliable }` : ne jamais réduire ça à un booléen, ce serait
