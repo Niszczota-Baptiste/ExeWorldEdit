@@ -439,6 +439,20 @@ export function createStaging(adapter, options = {}) {
     return fs.existsSync(legacy) ? legacy : null;
   }
 
+  /**
+   * Un aperçu JSON d'avant la phase 1.2 porte ses blocs en tableau ORDINAIRE.
+   * Tout ce qui suit attend un `Int32Array` — on convertit donc à la lecture,
+   * une fois, plutôt que de laisser deux formes circuler dans le moteur. C'est
+   * le même principe que le format binaire reconnu à ses octets : l'ancien se
+   * relit, et la première écriture le remplace.
+   */
+  function normaliseAncien(sparse) {
+    if (sparse?.blocks && !ArrayBuffer.isView(sparse.blocks)) {
+      sparse.blocks = Int32Array.from(sparse.blocks);
+    }
+    return sparse;
+  }
+
   function readPreview(id) {
     const p = previewFilePath(id);
     if (!p) {
@@ -451,7 +465,7 @@ export function createStaging(adapter, options = {}) {
     // une version antérieure se relit, la prochaine écriture le convertit.
     const sparse = isBinaryPreview(raw)
       ? decodePreview(raw)
-      : JSON.parse(zlib.gunzipSync(raw).toString('utf8'));
+      : normaliseAncien(JSON.parse(zlib.gunzipSync(raw).toString('utf8')));
     previewCache = { id, sparse };
     return sparse;
   }

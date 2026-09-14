@@ -68,7 +68,7 @@ builds pour le serveur Minefield — murailles, arènes, villes, terrains.
 
 ```bash
 npm install
-npm test          # tous les paquets (529 tests aujourd'hui : 384 moteur, 145 desktop)
+npm test          # tous les paquets (531 tests aujourd'hui : 386 moteur, 145 desktop)
 npm run lint
 
 npm run dev   --workspace @titi/desktop   # Vite + Electron
@@ -260,9 +260,23 @@ centaine de lignes, et rien d'autre. Ne pas casser cette possibilité sans raiso
 - **Compresser un fichier de CACHE au niveau par défaut.** L'aperçu passait
   457 ms dans gzip pour gagner 350 ko sur un fichier qu'on régénère à volonté.
   Niveau 1 : 67 ms. Un cache s'optimise pour le temps, pas pour la place.
-- **Repasser d'un tableau typé à un tableau JS coûte cher.** 850 000 blocs :
-  160 ms pour convertir un `Int32Array`, 16 ms pour remplir un `Array`
-  prédimensionné par index. Ce qui finit en JSON doit naître en `Array`.
+- **Une consigne de performance PÉRIMÉE est une dette qui ne se signale pas.**
+  Celle-ci disait : « ce qui finit en JSON doit naître en `Array` » — mesuré et
+  vrai à l'époque (160 ms pour convertir un `Int32Array` de 850 000 blocs,
+  contre 16 pour remplir un `Array`). L'aperçu est passé au format BINAIRE peu
+  après, et la consigne est restée. Résultat : on allouait un tableau JS de
+  3,3 millions d'entiers par opération — un objet du TAS de 13 Mo. Mesuré sur
+  douze recollages consécutifs : les quatre premiers à 32 ms, tous les suivants
+  à 124-140, parce que le ramasse-miettes s'y mettait. En `Int32Array` : 13 ms,
+  stable. Une mesure porte la date de ses hypothèses.
+- **Un `deepEqual` compare le CONTENEUR autant que le contenu.** Passer l'aperçu
+  en tableau typé a fait tomber sept tests qui n'attendaient qu'un `Array`.
+  Aucun ne portait sur le comportement — mais c'est le bon moment de décider si
+  le type FAIT partie du contrat. Ici oui : `assert.ok(blocks instanceof
+  Int32Array)` le dit, et la comparaison porte sur `[...blocks]`.
+- **`JSON.stringify` d'un tableau typé rend un OBJET,** `{"0":1,"1":2}`, pas un
+  tableau. Le chemin qui relit un aperçu d'avant la phase 1.2 le normalise donc
+  à la lecture (`normaliseAncien`) : une seule forme circule dans le moteur.
 - **Une clé texte dans une boucle chaude.** Le recollage d'aperçu refabriquait
   `nom|propriétés` par bloc : 317 ms. Une table de correspondance calculée une
   fois par palette ramène la boucle à de l'entier.

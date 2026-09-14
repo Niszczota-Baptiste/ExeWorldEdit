@@ -137,3 +137,17 @@ test('hors du monde, c’est toujours de l’air — et ce n’est PAS une erreu
   await s.warmup(BOX(0, 0, 0, 15, 0, 15));
   assert.equal(s.getBlock(100000, 0, 100000), null);
 });
+
+test('`deriveSparse` rend aussi des blocs typés', async () => {
+  // L'autre producteur. Si celui-ci rendait un tableau JS, le recollage
+  // repasserait par le tas à chaque opération sans que rien ne le signale.
+  const s = new RegionStore(blankRegions({ origin: { x: 0, y: 0, z: 0 }, size: { x: 16, y: 1, z: 16 } }));
+  const bbox = BOX(0, 0, 0, 15, 20, 15);
+  await s.warmup(bbox);
+  s.setBlock(3, 4, 5, { Name: 'minecraft:stone', Properties: null });
+  const sparse = s.deriveSparse(bbox, 1000);
+  assert.ok(sparse.blocks instanceof Int32Array);
+  assert.equal(sparse.count, 1);
+  assert.equal(sparse.blocks.length, 4, 'la vue est serrée sur le contenu, pas sur le tampon');
+  assert.deepEqual([...sparse.blocks.slice(0, 3)], [3, 4, 5]);
+});

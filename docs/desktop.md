@@ -2114,6 +2114,68 @@ de commit.
 
 ---
 
+## Le coût caché : un tableau de 13 Mo jeté à chaque opération
+
+Après avoir réglé la portée des opérations (571 → 92 ms), il restait 77 ms, tous
+dans l'aperçu. Le chemin a demandé **quatre mesures**, dont trois ont infirmé
+l'hypothèse — ce qui vaut d'être écrit, parce que l'intuition s'est trompée à
+chaque fois.
+
+| hypothèse | mesure | verdict |
+|---|---|---|
+| la boucle de recopie est lente | 30 ms sur 3,3 M entrées | non |
+| la fermeture `put()` par bloc | 20 ms contre 22 dépliée | non |
+| l'allocation du tableau | 11 ms | non |
+| **le ramasse-miettes** | 32 ms → 130 dès le 5ᵉ appel | **oui** |
+
+Le dernier test est celui qui a parlé : en gardant le résultat VIVANT, les
+quatre premiers appels prennent 14 ms et tous les suivants 96-139. Ce n'est pas
+le calcul, c'est la mémoire.
+
+### La consigne qui était vraie, et ne l'est plus
+
+`splicePreview` portait ce commentaire :
+
+> Tableau ORDINAIRE et non typé : l'aperçu finit en JSON, et repasser d'un
+> `Int32Array` à un tableau JS coûtait 160 ms sur 850 000 blocs.
+
+C'était **mesuré, et juste** — à l'époque. L'aperçu est passé au format binaire
+peu après, et la consigne est restée. On allouait donc un tableau JS de
+3,3 millions d'entiers par opération : un objet du tas de treize mégaoctets,
+jeté aussitôt, pendant que le précédent était encore en cache.
+
+Une mesure porte la date de ses hypothèses. Celle-ci a survécu à la sienne.
+
+### Ce qui a changé
+
+`blocks` est un `Int32Array` chez ses **trois** producteurs — `deriveSparse`
+(croissance géométrique, faute de connaître le compte d'avance), `decodePreview`
+(le compte est dans l'en-tête) et `splicePreview`. Les deux derniers rendent une
+`subarray`, donc une vue : `buf.length = n` n'existe pas sur un tableau typé, et
+une copie coûterait ce qu'on vient d'économiser.
+
+Un aperçu d'avant la phase 1.2 est normalisé à la lecture : `JSON.stringify`
+d'un tableau typé rendrait `{"0":1,"1":2}` — un objet, pas un tableau — et
+aucune version n'a jamais écrit ça. Mieux vaut convertir une fois à la lecture
+que laisser deux formes circuler.
+
+### Mesuré
+
+```
+splicePreview      126 ms  →  13 ms   (et stable : plus de dégradation)
+opération complète  92 ms  →  44 ms
+```
+
+Avec la passe précédente, une sphère dans une sélection « tout le build » passe
+de **571 ms à 44 ms — treize fois moins**.
+
+Sept tests sont tombés au passage : tous comparaient `blocks` par `deepEqual`,
+donc le CONTENEUR autant que le contenu. Aucun ne portait sur le comportement,
+mais c'était le moment de décider si le type fait partie du contrat. Il en fait
+partie : deux tests l'exigent maintenant explicitement.
+
+---
+
 ## Écarts assumés avec le moteur du site
 
 | Sujet | Site | Ici | Pourquoi |

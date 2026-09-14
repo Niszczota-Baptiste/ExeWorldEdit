@@ -116,7 +116,11 @@ export function decodePreview(buf) {
   // Tableau ORDINAIRE prédimensionné : c'est la forme que le reste du moteur et
   // le renderer attendent, et la remplir par index coûte dix fois moins que de
   // convertir une vue typée (mesuré).
-  const blocks = new Array(count * 4);
+  // Int32Array : c'est l'aperçu qui reste en cache entre deux opérations, donc
+  // celui qui est vivant pendant qu'on en construit un autre. Deux tableaux JS
+  // de treize mégaoctets côte à côte, c'est ce qui faisait passer le recollage
+  // de 32 ms à 130 dès que le ramasse-miettes s'en mêlait.
+  const blocks = new Int32Array(count * 4);
 
   if (mode === 'linear') {
     const idx = new Uint32Array(buf.buffer, buf.byteOffset + coordsAt, count);

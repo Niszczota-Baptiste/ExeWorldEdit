@@ -68,11 +68,16 @@ export function splicePreview({ base, patch, dirty, extent, maxBlocks = Infinity
   // de faire grandir un tableau de plusieurs millions d'entrées à coups de
   // `push`.
   //
-  // Tableau ORDINAIRE et non typé : l'aperçu finit en JSON, et repasser d'un
-  // `Int32Array` à un tableau JS coûtait 160 ms sur 850 000 blocs, contre 16 ms
-  // pour remplir directement un `Array` prédimensionné. Mesuré, pas supposé.
+  // Tableau TYPÉ. Le commentaire d'origine disait l'inverse — « l'aperçu finit
+  // en JSON » — et c'était vrai à l'époque ; il finit en BINAIRE depuis. La
+  // consigne périmée coûtait cher : un tableau JS de 3,3 millions d'entiers est
+  // un objet du tas, on en jetait un par opération, et le recollage passait de
+  // 32 ms à 130 dès que le ramasse-miettes s'y mettait (mesuré sur douze appels
+  // consécutifs : les quatre premiers rapides, tous les suivants quatre fois
+  // plus lents). Un tableau typé vit hors du tas et la boucle est 2 × plus
+  // rapide.
   const cap = Math.min(base.blocks.length + patch.blocks.length, maxBlocks * 4);
-  const buf = new Array(cap);
+  const buf = new Int32Array(cap);
   let n = 0;
   let overflow = false;
 
@@ -116,11 +121,11 @@ export function splicePreview({ base, patch, dirty, extent, maxBlocks = Infinity
   }
   bom.sort((a, b) => b.count - a.count);
 
-  buf.length = n;
-
   return {
     palette,
-    blocks: buf,
+    // Une VUE sur le tampon, pas une copie : `buf.length = n` n'existe pas sur
+    // un tableau typé, et `subarray` est gratuit.
+    blocks: buf.subarray(0, n),
     bom,
     count: n / 4,
     truncated: false,

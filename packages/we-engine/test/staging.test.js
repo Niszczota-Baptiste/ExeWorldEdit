@@ -1081,7 +1081,11 @@ test('un aperçu JSON gzippé d’une version antérieure se relit encore', asyn
 
   // On remet l'ancien format à la place du nouveau.
   const dir = path.dirname(staging.stagingRegionsDir('p1'));
-  fs.writeFileSync(path.join(dir, 'preview.json.gz'), zlib.gzipSync(Buffer.from(JSON.stringify(attendu))));
+  // L'ancien format écrivait ses blocs en tableau ORDINAIRE — `JSON.stringify`
+  // d'un tableau typé rendrait un objet `{"0":…}`, ce qu'aucune version n'a
+  // jamais écrit. On reproduit donc fidèlement ce qu'il y avait sur le disque.
+  const ancien = { ...attendu, blocks: [...attendu.blocks] };
+  fs.writeFileSync(path.join(dir, 'preview.json.gz'), zlib.gzipSync(Buffer.from(JSON.stringify(ancien))));
   fs.rmSync(path.join(dir, 'preview.bin'), { force: true });
 
   // Un staging NEUF sur le même dossier : pas de cache mémoire, donc il lit
@@ -1090,7 +1094,10 @@ test('un aperçu JSON gzippé d’une version antérieure se relit encore', asyn
   assert.equal(relu.hasPendingEdits('p1'), true, '« modifié » doit rester vrai');
   const p = relu.readPreview('p1');
   assert.equal(p.count, attendu.count);
-  assert.deepEqual(p.blocks, attendu.blocks);
+  // Relu, il porte des blocs TYPÉS comme n'importe quel aperçu : la conversion
+  // se fait à la lecture, pour qu'une seule forme circule dans le moteur.
+  assert.ok(p.blocks instanceof Int32Array, 'l’ancien format est normalisé');
+  assert.deepEqual([...p.blocks], [...attendu.blocks]);
   assert.deepEqual(p.palette, attendu.palette);
 });
 

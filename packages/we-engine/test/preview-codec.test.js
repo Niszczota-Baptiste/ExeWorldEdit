@@ -30,7 +30,13 @@ test('aller-retour exact sur un aperçu ordinaire', () => {
     [1, 0, 30, 'minecraft:oak_log'],
   ]);
   const back = decodePreview(encodePreview(p));
-  assert.deepEqual(back.blocks, p.blocks);
+  // Le décodeur rend un TABLEAU TYPÉ : c'est l'aperçu qui reste en cache entre
+  // deux opérations, donc celui qui est vivant pendant qu'on en construit un
+  // autre. Deux tableaux JS de treize mégaoctets côte à côte faisaient passer
+  // le recollage de 32 ms à 130 dès que le ramasse-miettes s'en mêlait. On
+  // compare donc le CONTENU, et on exige le type.
+  assert.ok(back.blocks instanceof Int32Array, 'l’aperçu décodé est typé');
+  assert.deepEqual([...back.blocks], [...p.blocks]);
   assert.deepEqual(back.palette, p.palette);
   assert.deepEqual(back.min, p.min);
   assert.deepEqual(back.size, p.size);
@@ -45,7 +51,7 @@ test('les coordonnées ne se mélangent pas entre axes', () => {
   const p = sparse({ x: 0, y: 0, z: 0 }, { x: 7, y: 3, z: 11 }, [
     [6, 0, 0, 'a'], [0, 2, 0, 'b'], [0, 0, 10, 'c'], [6, 2, 10, 'd'], [3, 1, 5, 'e'],
   ]);
-  assert.deepEqual(decodePreview(encodePreview(p)).blocks, p.blocks);
+  assert.deepEqual([...decodePreview(encodePreview(p)).blocks], [...p.blocks]);
 });
 
 test('chaque case d’une petite emprise se retrouve à sa place', () => {
@@ -57,13 +63,19 @@ test('chaque case d’une petite emprise se retrouve à sa place', () => {
   }
   const p = sparse({ x: 0, y: 0, z: 0 }, size, cells);
   const back = decodePreview(encodePreview(p));
-  assert.deepEqual(back.blocks, p.blocks);
+  // Le décodeur rend un TABLEAU TYPÉ : c'est l'aperçu qui reste en cache entre
+  // deux opérations, donc celui qui est vivant pendant qu'on en construit un
+  // autre. Deux tableaux JS de treize mégaoctets côte à côte faisaient passer
+  // le recollage de 32 ms à 130 dès que le ramasse-miettes s'en mêlait. On
+  // compare donc le CONTENU, et on exige le type.
+  assert.ok(back.blocks instanceof Int32Array, 'l’aperçu décodé est typé');
+  assert.deepEqual([...back.blocks], [...p.blocks]);
 });
 
 test('un aperçu vide fait un aller-retour', () => {
   const p = sparse({ x: 0, y: 0, z: 0 }, { x: 4, y: 4, z: 4 }, []);
   const back = decodePreview(encodePreview(p));
-  assert.deepEqual(back.blocks, []);
+  assert.deepEqual([...back.blocks], []);
   assert.equal(back.count, 0);
 });
 
@@ -80,7 +92,7 @@ test('une emprise trop grande pour un index linéaire bascule en mode triple', (
   const buf = encodePreview(p);
   const head = JSON.parse(buf.toString('utf8', 12, 12 + buf.readUInt32LE(8)));
   assert.equal(head.mode, 'triple', 'le mode linéaire déborderait');
-  assert.deepEqual(decodePreview(buf).blocks, p.blocks);
+  assert.deepEqual([...decodePreview(buf).blocks], [...p.blocks]);
 });
 
 test('une palette de plus de 65 535 entrées passe en index large', () => {
@@ -121,7 +133,7 @@ test('l’encodage est plus rapide que JSON sur un gros aperçu', () => {
     blocks, count: n, truncated: false, bom: [], min: { x: 0, y: 0, z: 0 }, size,
   };
 
-  assert.deepEqual(decodePreview(encodePreview(p)).blocks, p.blocks, 'exactitude d’abord');
+  assert.deepEqual([...decodePreview(encodePreview(p)).blocks], [...p.blocks], 'exactitude d’abord');
 
   // MEILLEUR de plusieurs passages, et pas un chronométrage unique : une seule
   // mesure attrape le premier passage à froid et le bruit de l'ordonnanceur.
@@ -139,4 +151,19 @@ test('l’encodage est plus rapide que JSON sur un gros aperçu', () => {
   // Marge franche sous le rapport réel : ce seuil ne se déclenche que sur une
   // vraie régression, pas sur une machine chargée.
   assert.ok(json >= binaire * 2, `aller-retour binaire ${binaire} ms contre JSON ${json} ms — le format n’a plus de raison d’être`);
+});
+
+test('l’aperçu porte ses blocs en TABLEAU TYPÉ, de bout en bout', () => {
+  // Ce n'est pas un détail d'implémentation : c'est ce qui a fait passer le
+  // recollage de 126 ms à 13. Un tableau JS de 3,3 millions d'entiers est un
+  // objet du TAS ; on en jetait un par opération, et le ramasse-miettes finissait
+  // par quadrupler le coût — mesuré sur douze appels consécutifs, les quatre
+  // premiers à 32 ms et tous les suivants à 124-140. Un tableau typé vit hors du
+  // tas, et la boucle qui le remplit est deux fois plus rapide.
+  //
+  // Le commentaire d'origine disait l'inverse — « l'aperçu finit en JSON, donc
+  // il doit naître en Array » — et c'était vrai avant le format binaire. Une
+  // consigne de performance périmée est une dette qui ne se signale pas.
+  const p = sparse({ x: 0, y: 0, z: 0 }, { x: 8, y: 8, z: 8 }, [[1, 2, 3, 'minecraft:stone']]);
+  assert.ok(decodePreview(encodePreview(p)).blocks instanceof Int32Array);
 });
